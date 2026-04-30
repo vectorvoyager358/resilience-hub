@@ -98,7 +98,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { updatePineconeNote } from '../utils/api';
 import { Note } from '../types';
-import { syncChallengeCompletedDays, getChallengeCalendarDayIndex, isChallengePastCalendarDuration } from '../utils/challengeProgress';
+import { syncChallengeCompletedDays, getChallengeCalendarDayIndex, isChallengePastCalendarDuration, formatChallengeWindowEndCalendarDisplay } from '../utils/challengeProgress';
 
 interface MilestoneAchievement {
   percentage: number;
@@ -1901,7 +1901,7 @@ const DashboardPage: React.FC = () => {
                             Start: {new Date(challenge.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            End: {new Date(new Date(challenge.startDate).getTime() + challenge.duration * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                            End: {formatChallengeWindowEndCalendarDisplay(challenge)}
                           </Typography>
                         </Stack>
                       </Box>
@@ -2103,7 +2103,7 @@ const DashboardPage: React.FC = () => {
                               Start: {new Date(challenge.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              End: {new Date(new Date(challenge.startDate).getTime() + challenge.duration * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                              End: {formatChallengeWindowEndCalendarDisplay(challenge)}
                             </Typography>
                           </Stack>
                         </Box>
@@ -2204,7 +2204,7 @@ const DashboardPage: React.FC = () => {
                                 Start: {new Date(challenge.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
-                                End: {new Date(new Date(challenge.startDate).getTime() + challenge.duration * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                End: {formatChallengeWindowEndCalendarDisplay(challenge)}
                               </Typography>
                             </Stack>
                           </Box>

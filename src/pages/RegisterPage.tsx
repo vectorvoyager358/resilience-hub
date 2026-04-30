@@ -28,7 +28,6 @@ const RegisterPage: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [verificationSent, setVerificationSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState({
@@ -40,8 +39,6 @@ const RegisterPage: React.FC = () => {
   });
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   
-  // navigate is needed for potential programmatic navigation
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const navigate = useNavigate();
   const { register } = useAuth();
 
@@ -89,11 +86,8 @@ const RegisterPage: React.FC = () => {
       };
       
       await createUserDocument(user.uid, userData);
-      
-      // Show verification message
-      setVerificationSent(true);
-      
-      // No automatic redirect - user must verify first
+
+      navigate('/verify-email', { replace: true });
     } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
       console.error("Registration error:", err);
       setError(
@@ -130,56 +124,7 @@ const RegisterPage: React.FC = () => {
           background: 'linear-gradient(135deg, rgba(255,255,255,1) 0%, rgba(245,248,255,1) 100%)'
         }}
       >
-        {verificationSent ? (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Avatar 
-              sx={{ 
-                mx: 'auto', 
-                mb: 2, 
-                width: 56, 
-                height: 56, 
-                bgcolor: '#2ec4b6' 
-              }}
-            >
-              <PersonAddIcon fontSize="large" />
-            </Avatar>
-            <Typography 
-              variant="h5" 
-              component="h1" 
-              sx={{ 
-                fontWeight: 700,
-                mb: 2
-              }}
-            >
-              Verification Required
-            </Typography>
-            <Typography variant="body1" sx={{ mb: 2 }}>
-              We&apos;ve sent a verification email to <strong>{email}</strong>.
-            </Typography>
-            <Typography variant="body1" sx={{ mb: 3 }}>
-              Please check your inbox and verify your email address before logging in.
-            </Typography>
-            <Alert severity="info" sx={{ mb: 3, mx: 'auto', maxWidth: '90%' }}>
-              You must verify your email before you can access.
-            </Alert>
-            <Button 
-              variant="contained"
-              component={Link}
-              to="/login"
-              sx={{ 
-                bgcolor: '#2ec4b6',
-                '&:hover': {
-                  bgcolor: '#2a9d8f'
-                },
-                minWidth: '160px'
-              }}
-            >
-              Go to Login
-            </Button>
-          </Box>
-        ) : (
-          <>
-            <Box sx={{ textAlign: 'center', mb: 3 }}>
+        <Box sx={{ textAlign: 'center', mb: 3 }}>
               <Avatar 
                 sx={{ 
                   mx: 'auto', 
@@ -361,8 +306,6 @@ const RegisterPage: React.FC = () => {
                 </Grid>
               </Grid>
             </Box>
-          </>
-        )}
       </Paper>
     </Container>
   );

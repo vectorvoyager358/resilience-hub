@@ -24,11 +24,8 @@ const LoginPage: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
-  const [verificationNeeded, setVerificationNeeded] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   
-  // navigate is required for potential programmatic navigation but currently used via window.location.href
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const navigate = useNavigate();
   const { login, resetPassword } = useAuth();
 
@@ -41,7 +38,6 @@ const LoginPage: React.FC = () => {
     
     try {
       setError('');
-      setVerificationNeeded(false);
       setLoading(true);
       
       try {
@@ -64,13 +60,11 @@ const LoginPage: React.FC = () => {
         window.location.href = '/dashboard';
         
       } catch (error: unknown) {
-        // Check if error is due to email not being verified
         if (error instanceof Error && error.message === 'email-not-verified') {
-          setVerificationNeeded(true);
-          return; // Don't set general error
+          navigate('/verify-email', { replace: true });
+          return;
         }
         
-        // Re-throw for other errors
         throw error;
       }
     } catch (err: any) {
@@ -169,14 +163,6 @@ const LoginPage: React.FC = () => {
             Password reset link has been sent to <strong>{email}</strong>. 
             Please check your inbox and follow the instructions to reset your password.
             If you don&apos;t see the email, check your spam folder.
-          </Alert>
-        )}
-
-        {verificationNeeded && (
-          <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
-            Your email address has not been verified. 
-            We&apos;ve sent a new verification email to <strong>{email}</strong>. 
-            Please check your inbox and verify your email before logging in.
           </Alert>
         )}
 

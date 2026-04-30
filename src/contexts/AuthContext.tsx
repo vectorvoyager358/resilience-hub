@@ -11,6 +11,7 @@ import {
   setPersistence,
   browserLocalPersistence,
   getRedirectResult,
+  reload,
   User,
   Auth,
   UserCredential
@@ -31,6 +32,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   updateDisplayName: (displayName: string) => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
+  refreshAuthUser: () => Promise<void>;
   updatePassword: (newPassword: string) => Promise<void>;
 }
 
@@ -49,13 +51,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function signup(email: string, password: string) {
-    // Set persistence first
     try {
       await setPersistence(auth, browserLocalPersistence);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       if (userCredential.user) {
         await sendEmailVerification(userCredential.user);
         console.log('User created and verification email sent');
+        await signOut(auth);
+        try {
+          localStorage.removeItem(AUTH_STATE_KEY);
+        } catch {
+          /* ignore */
+        }
       }
     } catch (error) {
       console.error('Error in signup:', error);
@@ -89,9 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await setPersistence(auth, browserLocalPersistence);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       
-      // Check if email is verified
       if (userCredential.user && !userCredential.user.emailVerified) {
-        // Send a new verification email
         await sendEmailVerification(userCredential.user);
         console.log('Email not verified, sent verification email');
         throw new Error('email-not-verified');
@@ -135,10 +140,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   function sendVerificationEmail() {
-    if (currentUser) {
-      return sendEmailVerification(currentUser);
+    const user = auth.currentUser;
+    if (user) {
+      return sendEmailVerification(user);
     }
     return Promise.reject(new Error('No user is currently signed in'));
+  }
+
+  async function refreshAuthUser() {
+    if (auth.currentUser) {
+      await reload(auth.currentUser);
+      setCurrentUser(auth.currentUser);
+    }
   }
 
   const updatePassword = async (newPassword: string) => {
@@ -199,6 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resetPassword,
     updateDisplayName,
     sendVerificationEmail,
+    refreshAuthUser,
     updatePassword
   };
 

@@ -5,14 +5,22 @@ import { CircularProgress, Box } from '@mui/material';
 
 interface PublicRouteProps {
   children: React.ReactNode;
+  /**
+   * If true (default), signed-in users with unverified email are sent to /verify-email.
+   * Set false for /register so signup can finish Firestore setup before navigating.
+   */
+  redirectUnverified?: boolean;
 }
 
 /**
  * PublicRoute component to handle authentication redirection for public pages
- * If user is already authenticated, redirect to dashboard
+ * If user is already authenticated and verified, redirect to dashboard
  * Otherwise, render the children (login/register pages)
  */
-const PublicRoute: React.FC<PublicRouteProps> = ({ children }) => {
+const PublicRoute: React.FC<PublicRouteProps> = ({
+  children,
+  redirectUnverified = true,
+}) => {
   const { currentUser, loading } = useAuth();
 
   if (loading) {
@@ -30,13 +38,16 @@ const PublicRoute: React.FC<PublicRouteProps> = ({ children }) => {
     );
   }
 
-  // If user is already authenticated, redirect to dashboard
   if (currentUser) {
-    console.log('User already authenticated, redirecting to dashboard');
-    return <Navigate to="/dashboard" />;
+    if (!currentUser.emailVerified && redirectUnverified) {
+      return <Navigate to="/verify-email" replace />;
+    }
+    if (currentUser.emailVerified) {
+      console.log('User already authenticated, redirecting to dashboard');
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
-  // Otherwise render the login/register page
   return <>{children}</>;
 };
 

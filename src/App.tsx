@@ -15,6 +15,7 @@ const NotesHistoryPage = lazy(() => import('./pages/NotesHistoryPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage'));
 
 // Loading component for suspense fallback
 const PageLoader = () => (
@@ -146,10 +147,11 @@ function App() {
                 </PublicRoute>
               } />
               <Route path="/register" element={
-                <PublicRoute>
+                <PublicRoute redirectUnverified={false}>
                   <RegisterPage />
                 </PublicRoute>
               } />
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
               
               {/* Protected Routes */}
               <Route path="/dashboard" element={

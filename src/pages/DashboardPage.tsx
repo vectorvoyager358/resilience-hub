@@ -98,6 +98,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { updatePineconeNote } from '../utils/api';
 import { Note } from '../types';
+import { syncChallengeCompletedDays, getChallengeCalendarDayIndex, isChallengePastCalendarDuration } from '../utils/challengeProgress';
 
 interface MilestoneAchievement {
   percentage: number;
@@ -160,17 +161,6 @@ const milestones: MilestoneAchievement[] = [
 ];
 
 
-function migrateNotes(notes: { [key: string]: any }): { [key: string]: Note } {
-  const migrated: { [key: string]: Note } = {};
-  for (const [day, value] of Object.entries(notes)) {
-    if (typeof value === 'string') {
-      migrated[day] = { content: value, vectorId: '' }; // vectorId unknown for legacy notes
-    } else {
-      migrated[day] = value;
-    }
-  }
-  return migrated;
-}
 
 
 function toTitleCase(str: string) {
@@ -500,6 +490,16 @@ const DashboardPage: React.FC = () => {
     const now = new Date();
     return getLocalDateKey(now);
   }, []);
+
+  const activeChallenges = useMemo(
+    () => userData.challenges.filter((c) => !isChallengePastCalendarDuration(c)),
+    [userData.challenges, lastKnownDate]
+  );
+
+  const archivedChallenges = useMemo(
+    () => userData.challenges.filter((c) => isChallengePastCalendarDuration(c)),
+    [userData.challenges, lastKnownDate]
+  );
   const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
@@ -604,7 +604,8 @@ const DashboardPage: React.FC = () => {
         
         if (userDoc.exists()) {
           const userData = userDoc.data() as User;
-          setUserData(userData);
+          const challenges = (userData.challenges || []).map((c) => syncChallengeCompletedDays(c));
+          setUserData({ ...userData, challenges });
         } else {
           // Initialize user data if it doesn't exist
           const initialData: User = {
@@ -650,32 +651,16 @@ const DashboardPage: React.FC = () => {
   const _isToday = (date: string): boolean => {
     return date === today;
   };
-
-  // Helper to calculate the day number for today in a challenge (1-indexed)
-  const getTodayDayNumber = (challenge: Challenge): number => {
-    const startDate = new Date(challenge.startDate);
-    const now = new Date();
-    
-    // Set both dates to start of day for accurate comparison
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const challengeStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-    
-    // Calculate days since start (floor to handle time differences)
-    const daysSinceStart = Math.floor((todayStart.getTime() - challengeStart.getTime()) / (1000 * 60 * 60 * 24));
-    
-    // Today's day number (1-indexed)
-    return daysSinceStart + 1;
-  };
-
-  // Check if a challenge has been marked complete today
   const hasMarkedTodayComplete = useCallback((challenge: Challenge): boolean => {
-    const todayDayNumber = getTodayDayNumber(challenge);
-    return challenge.notes[`${todayDayNumber}`] !== undefined;
+    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
+    const n = challenge.notes[`${todayDayNumber}`];
+    const content = typeof n?.content === 'string' ? n.content : '';
+    return content.trim().length > 0;
   }, []);
 
   // Helper to get the current day for a challenge (capped at challenge duration)
   const getCurrentDayForChallenge = (challenge: Challenge) => {
-    const dayNumber = getTodayDayNumber(challenge);
+    const dayNumber = getChallengeCalendarDayIndex(challenge);
     return Math.min(dayNumber, challenge.duration);
   };
 
@@ -685,9 +670,10 @@ const DashboardPage: React.FC = () => {
       return 0;
     }
 
-    // Get all completed days (keys are day numbers stored as strings)
+    // Calendar slots inside the challenge window only
     const completedDayNumbers = Object.keys(challenge.notes)
       .map(day => parseInt(day, 10))
+      .filter(d => !Number.isNaN(d) && d >= 1 && d <= challenge.duration)
       .sort((a, b) => b - a); // Sort in descending order (most recent first)
       
     if (completedDayNumbers.length === 0) {
@@ -695,7 +681,7 @@ const DashboardPage: React.FC = () => {
     }
     
     // Get current day number since start
-    const todayDayNumber = getTodayDayNumber(challenge);
+    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
     
     // Get the most recent completed day
     const mostRecentCompletedDay = completedDayNumbers[0];
@@ -789,22 +775,30 @@ const DashboardPage: React.FC = () => {
     }
   };
 
-  // Mark a challenge as complete for today
-    const handleMarkComplete = async (challengeId: string) => {
-      if (!currentUser) return;
-      const challenge = userData.challenges.find(c => c.id === challengeId);
-      if (!challenge) return;
-      const todayDayNumber = getTodayDayNumber(challenge);
+  // Mark a challenge as complete for today (calendar slot = days since start + 1)
+  const handleMarkComplete = async (challengeId: string) => {
+    if (!currentUser) return;
+    const challenge = userData.challenges.find(c => c.id === challengeId);
+    if (!challenge) return;
 
-      // Prevent duplicate completion for today
-      if (hasMarkedTodayComplete(challenge)) {
-        alert("You've already marked today's challenge as complete. Come back tomorrow!");
-        return;
-      }
+    if (!note.trim()) {
+      alert('Add a note before marking today complete.');
+      return;
+    }
 
-      // ... (your upsert logic here)
+    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
 
-      // Upsert to Pinecone and get vectorId
+    if (todayDayNumber < 1 || todayDayNumber > challenge.duration) {
+      alert('You are outside this challenge’s day range. Extend the duration in settings if you need more time.');
+      return;
+    }
+
+    if (hasMarkedTodayComplete(challenge)) {
+      alert("You've already marked today's challenge as complete. Come back tomorrow!");
+      return;
+    }
+
+    try {
       const upsertResponse = await upsertToPinecone({
         userId: currentUser.uid,
         type: 'note',
@@ -818,36 +812,38 @@ const DashboardPage: React.FC = () => {
       });
       const vectorId = upsertResponse.vectorId;
 
-      // Save note and vectorId in Firestore
-      const updatedChallenges = userData.challenges.map(challenge => {
-        if (challenge.id === challengeId) {
-          return {
-            ...challenge,
-            notes: migrateNotes({
-              ...challenge.notes,
-              [`${todayDayNumber}`]: { content: note, vectorId }
-            })
-          };
-        }
-        return {
-          ...challenge,
-          notes: migrateNotes(challenge.notes)
+      const updatedChallenges = userData.challenges.map(chItem => {
+        if (chItem.id !== challengeId) return chItem;
+        const merged: Challenge = {
+          ...chItem,
+          notes: {
+            ...(chItem.notes as Record<string, Note>),
+            [`${todayDayNumber}`]: { content: note.trim(), vectorId }
+          },
         };
+        return syncChallengeCompletedDays(merged);
       });
 
-      // Update Firestore
       await updateChallenges(currentUser.uid, updatedChallenges);
 
-      // **Add this: update local state**
+      const fresh = updatedChallenges.find(c => c.id === challengeId);
+      if (fresh) {
+        await upsertChallengeData(currentUser.uid, fresh);
+        checkMilestoneAchievement(fresh);
+      }
+
       setUserData(prev => ({
         ...prev,
         challenges: updatedChallenges
       }));
 
-      // Optionally, clear the note input
       setNote('');
       setChallengeIdForNote(null);
-    };
+    } catch (error) {
+      console.error('Error marking challenge complete:', error);
+      alert('Could not save today. Please try again.');
+    }
+  };
 
   const handleDeleteChallenge = (challengeId: string) => {
     setChallengeToDelete(challengeId);
@@ -990,12 +986,10 @@ const DashboardPage: React.FC = () => {
         if (challenge.id === logToDelete.challengeId) {
           const newNotes = { ...challenge.notes };
           delete newNotes[dayKey];
-          const newCompletedDays = Object.keys(newNotes).length;
-          return {
+          return syncChallengeCompletedDays({
             ...challenge,
-            notes: newNotes,
-            completedDays: newCompletedDays
-          };
+            notes: newNotes as Record<string, Note>,
+          });
         }
         return challenge;
       });
@@ -1016,6 +1010,11 @@ const DashboardPage: React.FC = () => {
       console.log('[PINECONE][DELETE LOG] Pinecone result:', pineconeResult);
 
       setUserData(prev => ({ ...prev, challenges: updatedChallenges }));
+
+      const refreshed = updatedChallenges.find(c => c.id === logToDelete.challengeId);
+      if (refreshed) {
+        await upsertChallengeData(currentUser.uid, refreshed);
+      }
     } catch (error) {
       console.error('[PINECONE][DELETE LOG] Error:', error);
     }
@@ -1056,24 +1055,24 @@ const DashboardPage: React.FC = () => {
       const newVectorId = upsertResponse.vectorId;
       const updatedChallenges = userData.challenges.map(challenge => {
         if (challenge.id === editChallengeId) {
-          return {
+          return syncChallengeCompletedDays({
             ...challenge,
-            notes: migrateNotes({
+            notes: {
               ...challenge.notes,
               [`${editLogDay}`]: { content: editNote, vectorId: newVectorId }
-            })
-          };
+            } as Record<string, Note>,
+          });
         }
-        return {
-          ...challenge,
-          notes: migrateNotes(challenge.notes)
-        };
+        return challenge;
       });
       await updateChallenges(currentUser.uid, updatedChallenges);
+      const fresh = updatedChallenges.find(c => c.id === editChallengeId);
+      if (fresh) {
+        await upsertChallengeData(currentUser.uid, fresh);
+      }
+      setUserData(prev => ({ ...prev, challenges: updatedChallenges }));
     }
 
-    // 4. Update Firestore and local state as you already do
-    // ... your Firestore update logic ...
     setEditLogDialog(false);
     setEditChallengeId(null);
     setEditLogDay(null);
@@ -1144,10 +1143,10 @@ const DashboardPage: React.FC = () => {
 
     const updatedChallenges = userData.challenges.map(challenge => {
       if (challenge.id === selectedChallengeId) {
-        return {
+        return syncChallengeCompletedDays({
           ...challenge,
-          duration: updatedDuration
-        };
+          duration: updatedDuration,
+        });
       }
       return challenge;
     });
@@ -1225,55 +1224,72 @@ const DashboardPage: React.FC = () => {
   const handleSaveNoteAndComplete = async () => {
     if (!selectedChallengeForNote) return;
     if (!currentUser) return;
+
     const challenge = userData.challenges.find(c => c.id === selectedChallengeForNote.id);
     if (!challenge) return;
-    const nextDay = challenge.completedDays + 1;
 
-    // Upsert to Pinecone and get vectorId
-    const upsertResponse = await upsertToPinecone({
-      userId: currentUser.uid,
-      type: 'note',
-      content: note,
-      metadata: {
-        challengeId: selectedChallengeForNote.id,
-        dayNumber: nextDay,
-        challengeName: selectedChallengeForNote.name,
-        completionDate: new Date().toISOString(),
-      }
-    });
-    const vectorId = upsertResponse.vectorId;
+    if (!note.trim()) {
+      alert('Add a note before saving.');
+      return;
+    }
 
-    const updatedChallenges = userData.challenges.map(c => {
-      if (c.id === selectedChallengeForNote.id) {
-        return {
-          ...c,
-          completedDays: nextDay,
-          notes: migrateNotes({
-            ...c.notes,
-            [nextDay]: { content: note, vectorId }
-          })
-        };
-      }
-      return {
-        ...c,
-        notes: migrateNotes(c.notes)
-      };
-    });
+    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
+
+    if (todayDayNumber < 1 || todayDayNumber > challenge.duration) {
+      alert('You are outside this challenge’s day range. Extend the duration if you need more time.');
+      return;
+    }
+
+    if (hasMarkedTodayComplete(challenge)) {
+      alert("You've already marked today's challenge as complete.");
+      return;
+    }
 
     try {
+      const upsertResponse = await upsertToPinecone({
+        userId: currentUser.uid,
+        type: 'note',
+        content: note,
+        metadata: {
+          challengeId: selectedChallengeForNote.id,
+          dayNumber: todayDayNumber,
+          challengeName: selectedChallengeForNote.name,
+          completionDate: new Date().toISOString(),
+        }
+      });
+      const vectorId = upsertResponse.vectorId;
+
+      const updatedChallenges = userData.challenges.map(c => {
+        if (c.id !== selectedChallengeForNote.id) return c;
+        return syncChallengeCompletedDays({
+          ...c,
+          notes: {
+            ...(c.notes as Record<string, Note>),
+            [`${todayDayNumber}`]: { content: note.trim(), vectorId },
+          },
+        });
+      });
+
       await updateChallenges(currentUser.uid, updatedChallenges);
-      const latestUserData = await getUserData(currentUser.uid);
-      if (latestUserData) setUserData(latestUserData);
+
+      const fresh = updatedChallenges.find(c => c.id === selectedChallengeForNote.id);
+      if (fresh) {
+        await upsertChallengeData(currentUser.uid, fresh);
+        checkMilestoneAchievement(fresh);
+      }
+
+      setUserData(prev => ({
+        ...prev,
+        challenges: updatedChallenges,
+      }));
+
       setNoteDialogOpen(false);
       setNote('');
       setChallengeIdForNote(null);
-
-      if (selectedChallengeForNote) {
-        await upsertNoteData(currentUser.uid, selectedChallengeForNote.id, nextDay, note);
-      }
-
+      setSelectedChallengeForNote(null);
     } catch (error) {
       console.error('Error saving note and completing challenge:', error);
+      alert('Could not save. Please try again.');
     }
   };
 
@@ -1288,7 +1304,7 @@ const DashboardPage: React.FC = () => {
     setEditTodayChallengeId(challenge.id);
     
     // Get today's day number for this challenge
-    const todayDayNumber = getTodayDayNumber(challenge);
+    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
     
     // Get the existing note for today
     const existingNote = challenge.notes[`${todayDayNumber}`]?.content || '';
@@ -1304,22 +1320,25 @@ const DashboardPage: React.FC = () => {
     const challenge = userData.challenges.find(c => c.id === editTodayChallengeId);
     if (!challenge) return;
     
-    const todayDayNumber = getTodayDayNumber(challenge);
-    
+    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
+
+    const prevVectorId =
+      challenge.notes[`${todayDayNumber}`]?.vectorId ?? '';
+
     const updatedChallenges = userData.challenges.map(c => {
       if (c.id === editTodayChallengeId) {
-        return {
+        return syncChallengeCompletedDays({
           ...c,
-          notes: migrateNotes({
-            ...c.notes,
-            [`${todayDayNumber}`]: { content: editTodayNote, vectorId: '' } // If you have the new vectorId, use it here
-          })
-        };
+          notes: {
+            ...(c.notes as Record<string, Note>),
+            [`${todayDayNumber}`]: {
+              content: editTodayNote.trim(),
+              vectorId: prevVectorId,
+            },
+          },
+        });
       }
-      return {
-        ...c,
-        notes: migrateNotes(c.notes)
-      };
+      return c;
     });
     
     try {
@@ -1341,8 +1360,7 @@ const DashboardPage: React.FC = () => {
       });
 
       // Update local state
-      const latestUserData = await getUserData(currentUser.uid);
-      if (latestUserData) setUserData(latestUserData);
+      setUserData(prev => ({ ...prev, challenges: updatedChallenges }));
       
       setEditTodayNoteDialogOpen(false);
       setEditTodayChallengeId(null);
@@ -1579,33 +1597,28 @@ const DashboardPage: React.FC = () => {
             <Tabs 
               value={currentTab} 
               onChange={handleTabChange}
+              variant="scrollable"
+              scrollButtons="auto"
               sx={{
                 '& .MuiTab-root': {
-                  minWidth: 120,
-                  fontWeight: 600
+                  minWidth: { xs: 100, sm: 120 },
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  fontSize: { xs: '0.875rem', sm: '1rem' },
                 }
               }}
             >
               <Tab 
-                label="Challenges" 
-                sx={{ 
-                  textTransform: 'none',
-                  fontSize: '1rem'
-                }}
+                label="Active Challenges" 
               />
               <Tab 
                 label="Info" 
-                sx={{ 
-                  textTransform: 'none',
-                  fontSize: '1rem'
-                }}
               />
               <Tab 
                 label="Notes History" 
-                sx={{ 
-                  textTransform: 'none',
-                  fontSize: '1rem'
-                }}
+              />
+              <Tab 
+                label="Archives" 
               />
             </Tabs>
           </Box>
@@ -1739,7 +1752,8 @@ const DashboardPage: React.FC = () => {
             </Grid>
 
             {/* Challenge Cards */}
-            {userData.challenges.map((challenge, index) => (
+            {/* Challenge Cards (active only) */}
+            {activeChallenges.map((challenge, index) => (
               <Zoom 
                 in={true} 
                 style={{ transitionDelay: `${index * 100}ms` }}
@@ -1915,10 +1929,10 @@ const DashboardPage: React.FC = () => {
                         <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                           <Box sx={{ mr: 1, flex: 1 }}>
                             <Typography variant="body2" color="text.secondary" noWrap sx={{ fontStyle: 'italic' }}>
-                              {challenge.notes[`${getTodayDayNumber(challenge)}`]?.content
-                                ? challenge.notes[`${getTodayDayNumber(challenge)}`]?.content.length > 30
-                                  ? challenge.notes[`${getTodayDayNumber(challenge)}`]?.content.substring(0, 30) + '...'
-                                  : challenge.notes[`${getTodayDayNumber(challenge)}`]?.content
+                              {challenge.notes[`${getChallengeCalendarDayIndex(challenge)}`]?.content
+                                ? challenge.notes[`${getChallengeCalendarDayIndex(challenge)}`]?.content.length > 30
+                                  ? challenge.notes[`${getChallengeCalendarDayIndex(challenge)}`]?.content.substring(0, 30) + '...'
+                                  : challenge.notes[`${getChallengeCalendarDayIndex(challenge)}`]?.content
                                 : 'Note not added'
                               }
                             </Typography>
@@ -1975,7 +1989,12 @@ const DashboardPage: React.FC = () => {
                             variant="contained"
                             color="primary"
                             onClick={() => handleMarkComplete(challenge.id)}
-                            disabled={getCurrentDayForChallenge(challenge) > challenge.duration}
+                            disabled={
+                              challengeIdForNote !== challenge.id ||
+                              !note.trim() ||
+                              getChallengeCalendarDayIndex(challenge) < 1 ||
+                              getChallengeCalendarDayIndex(challenge) > challenge.duration
+                            }
                             sx={{ 
                               whiteSpace: 'nowrap',
                               minWidth: 'auto',
@@ -1992,13 +2011,40 @@ const DashboardPage: React.FC = () => {
                 </Grid>
               </Zoom>
             ))}
+            {activeChallenges.length === 0 && userData.challenges.length > 0 && (
+              <Grid item xs={12}>
+                <Alert severity="info" sx={{ borderRadius: 2 }}>
+                  No challenge is currently within days 1 through its duration (today is past the last day for each one).{' '}
+                  Open <Box component="span" sx={{ fontWeight: 700 }}>Archives</Box>, or start a new challenge from the + menu.
+                </Alert>
+              </Grid>
+            )}
           </Grid>
         )}
         {currentTab === 1 && (
           <Box sx={{ mt: 4 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              All challenges—active and archived. Click a card for details.
+            </Typography>
+            {userData.challenges.length === 0 ? (
+              <Paper
+                sx={{
+                  p: 4,
+                  textAlign: 'center',
+                  borderRadius: 3,
+                  bgcolor: 'background.default',
+                  border: '1px dashed',
+                  borderColor: 'divider',
+                }}
+              >
+                <Typography color="text.secondary">No challenges yet. Add one from the + menu.</Typography>
+              </Paper>
+            ) : (
             <Grid container spacing={3}>
               {userData.challenges.map((challenge) => {
                 const streak = getStreakForChallenge(challenge);
+                const pastWindow = isChallengePastCalendarDuration(challenge);
+                const fullyFilled = challenge.completedDays >= challenge.duration;
                 return (
                   <Grid item xs={12} sm={6} md={4} key={challenge.id}>
                     <Paper
@@ -2019,15 +2065,31 @@ const DashboardPage: React.FC = () => {
                       onClick={() => { setPreviewChallenge(challenge); setPreviewOpen(true); }}
                     >
                       <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 3, pb: 2 }}>
-                        <Avatar sx={{ bgcolor: 'primary.main', color: 'white', width: 48, height: 48, fontSize: 28, boxShadow: '0 2px 8px 0 rgba(46,196,182,0.10)' }}>
+                        <Avatar sx={{
+                          bgcolor: fullyFilled ? 'success.main' : pastWindow ? 'grey.600' : 'primary.main',
+                          color: 'white',
+                          width: 48,
+                          height: 48,
+                          fontSize: 28,
+                          boxShadow: '0 2px 8px 0 rgba(46,196,182,0.10)',
+                        }}>
                           {getChallengeIcon(challenge.name)}
                         </Avatar>
                         <Box sx={{ flexGrow: 1 }}>
-                          <Typography variant="h6" fontWeight={700} sx={{ mb: 0.5, color: 'text.primary', fontSize: '1.15rem' }}>
-                            {challenge.name}
-                          </Typography>
+                          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" sx={{ mb: 0.5 }}>
+                            <Typography variant="h6" fontWeight={700} sx={{ color: 'text.primary', fontSize: '1.15rem' }}>
+                              {challenge.name}
+                            </Typography>
+                            {fullyFilled ? (
+                              <Chip label="All days logged" size="small" color="success" sx={{ height: 22 }} />
+                            ) : pastWindow ? (
+                              <Chip label="Window ended" size="small" color="warning" variant="outlined" sx={{ height: 22 }} />
+                            ) : (
+                              <Chip label="Active window" size="small" variant="outlined" color="primary" sx={{ height: 22 }} />
+                            )}
+                          </Stack>
                           <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                            Days Completed: <b>{Object.keys(challenge.notes || {}).length}</b> / {challenge.duration}
+                            Days completed: <b>{challenge.completedDays}</b> / {challenge.duration}
                           </Typography>
                           <Chip
                             label={streak > 0 ? `Streak: ${streak} day${streak > 1 ? 's' : ''}` : 'No streak'}
@@ -2051,101 +2113,7 @@ const DashboardPage: React.FC = () => {
                 );
               })}
             </Grid>
-            {/* Preview Dialog */}
-            <Dialog
-              open={previewOpen && !!previewChallenge}
-              onClose={() => setPreviewOpen(false)}
-              maxWidth="md"
-              fullWidth
-              PaperProps={{ sx: { borderRadius: 3 } }}
-            >
-              <DialogTitle>
-                <Typography variant="h6" fontWeight={700}>{previewChallenge?.name}</Typography>
-              </DialogTitle>
-              <DialogContent>
-                {previewChallenge && (
-                  <Box sx={{ mt: 2 }}>
-                    <Grid container spacing={1}>
-                      {Array.from({ length: previewChallenge.duration }).map((_, i) => {
-                        const dayNum = i + 1;
-                        const startDate = new Date(previewChallenge.startDate);
-                        const cellDate = new Date(startDate.getTime());
-                        cellDate.setDate(startDate.getDate() + i);
-                        const isLogged = dayNum <= previewChallenge.completedDays;
-                        const note = previewChallenge.notes[`${dayNum}`];
-                        const tooltipContent = note
-                          ? (<Box sx={{p:1}}><Typography variant="caption" fontWeight={600}>{cellDate.toLocaleDateString()}</Typography><Typography variant="body2" sx={{whiteSpace:'pre-wrap'}}>{note.content}</Typography></Box>)
-                          : cellDate.toLocaleDateString();
-                        return (
-                          <Grid item xs={2} sm={1} key={dayNum}>
-                            {isMobile ? (
-                              <Box
-                                sx={{
-                                  width: 40,
-                                  height: 40,
-                                  bgcolor: isLogged ? 'primary.main' : 'background.paper',
-                                  color: isLogged ? 'common.white' : 'text.secondary',
-                                  borderRadius: 2.5,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontWeight: 700,
-                                  fontSize: '1.05rem',
-                                  cursor: 'pointer',
-                                  border: isLogged ? '2.5px solid #2ec4b6' : '1.5px solid #e0e0e0',
-                                  boxShadow: isLogged ? '0 2px 8px 0 rgba(46,196,182,0.10)' : 'none',
-                                  transition: 'background 0.2s, color 0.2s, box-shadow 0.2s',
-                                  '&:active': {
-                                    boxShadow: '0 0 0 2px #2ec4b6',
-                                  },
-                                }}
-                                onClick={() => { setCellDialogContent({date: cellDate.toLocaleDateString(), note: note?.content || ''}); setCellDialogOpen(true); }}
-                              >
-                                {dayNum}
-                              </Box>
-                            ) : (
-                              <Tooltip title={tooltipContent} arrow>
-                                <Box
-                                  sx={{
-                                    width: 40,
-                                    height: 40,
-                                    bgcolor: isLogged ? 'primary.main' : 'background.paper',
-                                    color: isLogged ? 'common.white' : 'text.secondary',
-                                    borderRadius: 2.5,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontWeight: 700,
-                                    fontSize: '1.05rem',
-                                    cursor: 'pointer',
-                                    border: isLogged ? '2.5px solid #2ec4b6' : '1.5px solid #e0e0e0',
-                                    boxShadow: isLogged ? '0 2px 8px 0 rgba(46,196,182,0.10)' : 'none',
-                                    transition: 'background 0.2s, color 0.2s, box-shadow 0.2s',
-                                    '&:hover': {
-                                      boxShadow: isLogged ? '0 0 0 2px #2ec4b6' : '0 0 0 2px #e0e0e0',
-                                      bgcolor: isLogged ? 'primary.dark' : 'grey.100',
-                                    },
-                                  }}
-                                >
-                                  {dayNum}
-                                </Box>
-                              </Tooltip>
-                            )}
-                          </Grid>
-                        );
-                      })}
-                    </Grid>
-                    {/* Legend */}
-                    <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 3, mb: 1 }}>
-                      <Box sx={{ width: 24, height: 24, bgcolor: 'primary.main', borderRadius: 1, border: '2px solid #2ec4b6', mr: 1 }} />
-                      <Typography variant="body2" color="text.secondary">Logged Day</Typography>
-                      <Box sx={{ width: 24, height: 24, bgcolor: 'background.paper', borderRadius: 1, border: '1.5px solid #e0e0e0', ml: 3, mr: 1 }} />
-                      <Typography variant="body2" color="text.secondary">Not Logged</Typography>
-                    </Stack>
-                  </Box>
-                )}
-              </DialogContent>
-            </Dialog>
+            )}
           </Box>
         )}
         {currentTab === 2 && (
@@ -2153,9 +2121,200 @@ const DashboardPage: React.FC = () => {
             <NotesHistoryPage />
           </Box>
         )}
+        {currentTab === 3 && (
+          <Box sx={{ mt: 4 }}>
+            {archivedChallenges.length === 0 ? (
+              <Paper
+                sx={{
+                  p: 4,
+                  textAlign: 'center',
+                  borderRadius: 3,
+                  bgcolor: 'background.default',
+                  border: '1px dashed',
+                  borderColor: 'divider',
+                }}
+              >
+                <Typography color="text.secondary">
+                  Nothing here yet. A 10‑day challenge appears after calendar day 11 (even if you only logged some days)—while you&apos;re still on days 1–10 it stays under Active Challenges.
+                </Typography>
+              </Paper>
+            ) : (
+              <Grid container spacing={3}>
+                {archivedChallenges.map((challenge) => {
+                  const streak = getStreakForChallenge(challenge);
+                  const fullyFilled = challenge.completedDays >= challenge.duration;
+                  return (
+                    <Grid item xs={12} sm={6} md={4} key={challenge.id}>
+                      <Paper
+                        elevation={4}
+                        sx={{
+                          p: 0,
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          background: fullyFilled
+                            ? 'linear-gradient(135deg, #f0fdf9 0%, #e8f5f4 100%)'
+                            : 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
+                          boxShadow: '0 4px 24px 0 rgba(46,196,182,0.12)',
+                          border: fullyFilled
+                            ? '1px solid rgba(46,196,182,0.2)'
+                            : '1px solid rgba(0,0,0,0.08)',
+                          transition: 'box-shadow 0.2s, transform 0.2s',
+                          '&:hover': {
+                            boxShadow: '0 8px 32px 0 rgba(46,196,182,0.2)',
+                            transform: 'translateY(-2px) scale(1.02)',
+                          },
+                        }}
+                        onClick={() => { setPreviewChallenge(challenge); setPreviewOpen(true); }}
+                      >
+                        <Stack direction="row" alignItems="center" spacing={2} sx={{ p: 3, pb: 2 }}>
+                          <Avatar sx={{
+                            bgcolor: fullyFilled ? 'success.main' : 'grey.600',
+                            color: 'white',
+                            width: 48,
+                            height: 48,
+                            fontSize: 28,
+                            boxShadow: '0 2px 8px 0 rgba(0,0,0,0.12)',
+                          }}>
+                            {getChallengeIcon(challenge.name)}
+                          </Avatar>
+                          <Box sx={{ flexGrow: 1 }}>
+                            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" sx={{ mb: 0.5 }}>
+                              <Typography variant="h6" fontWeight={700} sx={{ color: 'text.primary', fontSize: '1.15rem' }}>
+                                {challenge.name}
+                              </Typography>
+                              {fullyFilled ? (
+                                <Chip label="All days logged" size="small" color="success" sx={{ height: 22 }} />
+                              ) : (
+                                <Chip label="Window ended" size="small" color="warning" variant="outlined" sx={{ height: 22 }} />
+                              )}
+                            </Stack>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                              Days completed:{' '}
+                              <b>{challenge.completedDays}</b> / {challenge.duration}
+                            </Typography>
+                            <Chip
+                              label={streak > 0 ? `Streak: ${streak} day${streak > 1 ? 's' : ''}` : 'No streak'}
+                              color={streak > 0 ? 'warning' : 'default'}
+                              size="small"
+                              icon={<LocalFireDepartmentIcon sx={{ color: streak > 0 ? 'orange' : 'grey.400' }} />}
+                              sx={{ fontWeight: 600, bgcolor: streak > 0 ? 'rgba(255,193,7,0.12)' : 'grey.100', color: streak > 0 ? 'orange' : 'text.secondary', mt: 0.5 }}
+                            />
+                            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                Start: {new Date(challenge.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                End: {new Date(new Date(challenge.startDate).getTime() + challenge.duration * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </Typography>
+                            </Stack>
+                          </Box>
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                  );
+                })}
+              </Grid>
+            )}
+          </Box>
+        )}
+        <Dialog
+          open={previewOpen && !!previewChallenge}
+          onClose={() => setPreviewOpen(false)}
+          maxWidth="md"
+          fullWidth
+          PaperProps={{ sx: { borderRadius: 3 } }}
+        >
+          <DialogTitle>
+            <Typography variant="h6" fontWeight={700}>{previewChallenge?.name}</Typography>
+          </DialogTitle>
+          <DialogContent>
+            {previewChallenge && (
+              <Box sx={{ mt: 2 }}>
+                <Grid container spacing={1}>
+                  {Array.from({ length: previewChallenge.duration }).map((_, i) => {
+                    const dayNum = i + 1;
+                    const startDate = new Date(previewChallenge.startDate);
+                    const cellDate = new Date(startDate.getTime());
+                    cellDate.setDate(startDate.getDate() + i);
+                    const isLogged = Boolean(
+                      previewChallenge.notes[`${dayNum}`]?.content?.trim()
+                    );
+                    const note = previewChallenge.notes[`${dayNum}`];
+                    const tooltipContent = note
+                      ? (<Box sx={{p:1}}><Typography variant="caption" fontWeight={600}>{cellDate.toLocaleDateString()}</Typography><Typography variant="body2" sx={{whiteSpace:'pre-wrap'}}>{note.content}</Typography></Box>)
+                      : cellDate.toLocaleDateString();
+                    return (
+                      <Grid item xs={2} sm={1} key={dayNum}>
+                        {isMobile ? (
+                          <Box
+                            sx={{
+                              width: 40,
+                              height: 40,
+                              bgcolor: isLogged ? 'primary.main' : 'background.paper',
+                              color: isLogged ? 'common.white' : 'text.secondary',
+                              borderRadius: 2.5,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: '1.05rem',
+                              cursor: 'pointer',
+                              border: isLogged ? '2.5px solid #2ec4b6' : '1.5px solid #e0e0e0',
+                              boxShadow: isLogged ? '0 2px 8px 0 rgba(46,196,182,0.10)' : 'none',
+                              transition: 'background 0.2s, color 0.2s, box-shadow 0.2s',
+                              '&:active': {
+                                boxShadow: '0 0 0 2px #2ec4b6',
+                              },
+                            }}
+                            onClick={() => { setCellDialogContent({date: cellDate.toLocaleDateString(), note: note?.content || ''}); setCellDialogOpen(true); }}
+                          >
+                            {dayNum}
+                          </Box>
+                        ) : (
+                          <Tooltip title={tooltipContent} arrow>
+                            <Box
+                              sx={{
+                                width: 40,
+                                height: 40,
+                                bgcolor: isLogged ? 'primary.main' : 'background.paper',
+                                color: isLogged ? 'common.white' : 'text.secondary',
+                                borderRadius: 2.5,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 700,
+                                fontSize: '1.05rem',
+                                cursor: 'pointer',
+                                border: isLogged ? '2.5px solid #2ec4b6' : '1.5px solid #e0e0e0',
+                                boxShadow: isLogged ? '0 2px 8px 0 rgba(46,196,182,0.10)' : 'none',
+                                transition: 'background 0.2s, color 0.2s, box-shadow 0.2s',
+                                '&:hover': {
+                                  boxShadow: isLogged ? '0 0 0 2px #2ec4b6' : '0 0 0 2px #e0e0e0',
+                                  bgcolor: isLogged ? 'primary.dark' : 'grey.100',
+                                },
+                              }}
+                            >
+                              {dayNum}
+                            </Box>
+                          </Tooltip>
+                        )}
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+                <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 3, mb: 1 }}>
+                  <Box sx={{ width: 24, height: 24, bgcolor: 'primary.main', borderRadius: 1, border: '2px solid #2ec4b6', mr: 1 }} />
+                  <Typography variant="body2" color="text.secondary">Logged Day</Typography>
+                  <Box sx={{ width: 24, height: 24, bgcolor: 'background.paper', borderRadius: 1, border: '1.5px solid #e0e0e0', ml: 3, mr: 1 }} />
+                  <Typography variant="body2" color="text.secondary">Not Logged</Typography>
+                </Stack>
+              </Box>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Empty state when no challenges */}
-        {userData.challenges.length === 0 && (
+        {userData.challenges.length === 0 && currentTab === 0 && (
           <Fade in={true} timeout={800}>
             <Paper
               sx={{
@@ -2656,7 +2815,18 @@ const DashboardPage: React.FC = () => {
               onClick={handleSaveNoteAndComplete}
               variant="contained" 
               color="primary"
-              disabled={!note.trim() || (selectedChallengeForNote ? note.trim() === (selectedChallengeForNote.notes[selectedChallengeForNote.completedDays + 1]?.content || '') : false)}
+              disabled={
+                !selectedChallengeForNote ||
+                !note.trim() ||
+                (() => {
+                  const c = userData.challenges.find(x => x.id === selectedChallengeForNote!.id);
+                  if (!c) return true;
+                  const d = getChallengeCalendarDayIndex(c);
+                  if (d < 1 || d > c.duration) return true;
+                  const prev = (c.notes[`${d}`]?.content ?? '').trim();
+                  return note.trim() === prev;
+                })()
+              }
             >
               Save & Complete Challenge
             </Button>
@@ -2712,7 +2882,16 @@ const DashboardPage: React.FC = () => {
               onClick={handleSaveEditTodayNote}
               variant="contained" 
               color="primary"
-              disabled={!editTodayNote.trim() || (editTodayChallengeId ? (userData.challenges.find(c => c.id === editTodayChallengeId)?.notes[(userData.challenges.find(c => c.id === editTodayChallengeId)?.completedDays || 0) + 1]?.content === editTodayNote) : false)}
+              disabled={
+                !editTodayNote.trim() ||
+                (() => {
+                  const c = userData.challenges.find(x => x.id === editTodayChallengeId);
+                  if (!c || !editTodayChallengeId) return false;
+                  const d = getChallengeCalendarDayIndex(c);
+                  const prev = (c.notes[`${d}`]?.content ?? '').trim();
+                  return prev === editTodayNote.trim();
+                })()
+              }
             >
               Save
             </Button>

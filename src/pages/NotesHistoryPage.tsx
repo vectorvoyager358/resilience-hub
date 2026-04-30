@@ -41,6 +41,7 @@ import { Challenge, User } from '../types';
 import ChatAssistant from '../components/ChatAssistant';
 import { useAuth } from '../contexts/AuthContext';
 import { getUserData } from '../services/firestore';
+import { normalizeUserChallenges } from '../utils/challengeProgress';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -137,7 +138,7 @@ const NotesHistoryPage: React.FC = () => {
         const unsubscribeFunc = await getUserData(currentUser.uid)
           .then((data) => {
             if (data) {
-              setUserData(data);
+              setUserData(normalizeUserChallenges(data));
             }
             setLoading(false);
             return undefined;

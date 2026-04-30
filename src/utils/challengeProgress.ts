@@ -1,15 +1,40 @@
 import type { Challenge, Note, User } from '../types';
 
-/** 1-based calendar day index for today relative to challenge startDate (local calendar). */
-export function getChallengeCalendarDayIndex(challenge: Challenge): number {
+/** Calendar day 1 aligns with challenge startDate's local calendar date (midnight-normalized). */
+export function getChallengeCalendarStartLocal(challenge: Challenge): Date {
   const startDate = new Date(challenge.startDate);
+  return new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+}
+
+/** 1-based calendar day index for today relative to challenge start (same local-normalization rules as archiving). */
+export function getChallengeCalendarDayIndex(challenge: Challenge): number {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const challengeStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const challengeStart = getChallengeCalendarStartLocal(challenge);
   const daysSinceStart = Math.floor(
     (todayStart.getTime() - challengeStart.getTime()) / (1000 * 60 * 60 * 24)
   );
   return daysSinceStart + 1;
+}
+
+/**
+ * Last local calendar date inside the planned window (day index === duration).
+ * First archived calendar day is the day after this.
+ */
+export function getChallengeWindowLastDayLocalDate(challenge: Challenge): Date {
+  const dur = Math.max(1, challenge.duration);
+  const startLocal = getChallengeCalendarStartLocal(challenge);
+  const last = new Date(startLocal);
+  last.setDate(startLocal.getDate() + dur - 1);
+  return last;
+}
+
+export function formatChallengeWindowEndCalendarDisplay(challenge: Challenge): string {
+  return getChallengeWindowLastDayLocalDate(challenge).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 /** Calendar window ended: past the last planned day, regardless of how many logs exist. Active while index ≤ duration. */

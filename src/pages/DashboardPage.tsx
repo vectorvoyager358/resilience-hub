@@ -1987,7 +1987,7 @@ const DashboardPage: React.FC = () => {
         {currentTab === 1 && (
           <Box sx={{ mt: 4 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              All challenges—active and archived. Click a card for details.
+              Active challenges are listed first; ones whose calendar window has ended appear after. Click a card for details.
             </Typography>
             {userData.challenges.length === 0 ? (
               <Paper
@@ -2004,7 +2004,14 @@ const DashboardPage: React.FC = () => {
               </Paper>
             ) : (
             <Grid container spacing={3}>
-              {userData.challenges.map((challenge) => {
+              {[...userData.challenges]
+                .sort((a, b) => {
+                  const aPast = isChallengePastCalendarDuration(a);
+                  const bPast = isChallengePastCalendarDuration(b);
+                  if (aPast === bPast) return 0;
+                  return aPast ? 1 : -1;
+                })
+                .map((challenge) => {
                 const streak = getLoggedStreakForChallenge(challenge);
                 const pastWindow = isChallengePastCalendarDuration(challenge);
                 const fullyFilled = challenge.completedDays >= challenge.duration;

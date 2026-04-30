@@ -9,7 +9,8 @@ export interface Challenge {
 
 export type Note = {
   content: string;
-  vectorId: string;
+  /** Set when the note was synced to Pinecone; absent if RAG backend failed or is disabled. */
+  vectorId?: string;
 };
 
 export interface User {

@@ -58,17 +58,57 @@ export function migrateNotes(notes: { [key: string]: any }): { [key: string]: No
   return migrated;
 }
 
-/** Count calendar slots 1..duration that have a non-empty note (canonical progress). */
-export function countFilledDaysInWindowFromNotes(notes: NotesBag, duration: number): number {
-  let count = 0;
-  for (let d = 1; d <= duration; d++) {
+/**
+ * Calendar slots 1..duration whose note counts as logged (non-empty trimmed text).
+ * Matches completedDays semantics; sorted descending for streak scans.
+ */
+export function getFilledDayIndicesDescendingFromNotes(notes: NotesBag, duration: number): number[] {
+  const indices: number[] = [];
+  const dur = Math.max(1, duration);
+  for (let d = 1; d <= dur; d++) {
     const raw = notes[String(d)];
     let content = '';
     if (typeof raw === 'string') content = raw;
     else if (raw && typeof raw.content === 'string') content = raw.content;
-    if (content.trim().length > 0) count++;
+    if (content.trim().length > 0) indices.push(d);
   }
-  return count;
+  indices.sort((a, b) => b - a);
+  return indices;
+}
+
+/** Count calendar slots 1..duration that have a non-empty note (canonical progress). */
+export function countFilledDaysInWindowFromNotes(notes: NotesBag, duration: number): number {
+  return getFilledDayIndicesDescendingFromNotes(notes, duration).length;
+}
+
+/**
+ * Consecutive logged-day streak relative to today’s calendar index in the challenge window.
+ * Only days with non-empty trimmed note text count (same as `completedDays` / UI grid).
+ */
+export function getLoggedStreakForChallenge(challenge: Challenge): number {
+  const notes = migrateNotes(challenge.notes as { [key: string]: unknown });
+  const dur = Math.max(1, challenge.duration);
+
+  const completedDayNumbers = getFilledDayIndicesDescendingFromNotes(notes, dur);
+  if (completedDayNumbers.length === 0) return 0;
+
+  const todayDayNumber = getChallengeCalendarDayIndex(challenge);
+  const mostRecentCompletedDay = completedDayNumbers[0];
+
+  if (todayDayNumber - mostRecentCompletedDay > 1) return 0;
+
+  let streak = 1;
+  let expectedPreviousDay = mostRecentCompletedDay - 1;
+  for (let i = 1; i < completedDayNumbers.length; i++) {
+    const completedDay = completedDayNumbers[i];
+    if (completedDay === expectedPreviousDay) {
+      streak++;
+      expectedPreviousDay--;
+    } else {
+      break;
+    }
+  }
+  return streak;
 }
 
 export function syncChallengeCompletedDays(challenge: Challenge): Challenge {

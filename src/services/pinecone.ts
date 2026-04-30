@@ -1,73 +1,69 @@
-import { Challenge, User, Note } from '../types';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { Challenge, Note } from '../types';
+import { embedTextToVector } from '../utils/embeddings';
 
-// Function to get embeddings from Gemini
-async function getEmbedding(text: string) {
-  const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY || '');
-  const embeddingModel = genAI.getGenerativeModel({ model: "embedding-001" });
-  const result = await embeddingModel.embedContent(text);
-  return Array.from(result.embedding.values);
-}
-
-// Function to upsert challenge data
-export async function upsertChallengeData(userId: string, challenge: Challenge) {
+/** Pinecone mirror only — failures must not block Firestore or UI */
+async function postUpsertPinecone(body: object): Promise<{
+  ok: true;
+  data: Record<string, unknown>;
+} | { ok: false }> {
   try {
-    console.log('Starting upsert for challenge:', challenge.name);
-    const vector = await getEmbedding(
-      `Challenge: ${challenge.name}. Progress: ${challenge.completedDays}/${challenge.duration} days.`
-    );
-    console.log('Got embedding, sending to server...');
-
     const response = await fetch('/api/upsert-pinecone', {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        userId,
-        vector,
-        metadata: {
-          type: 'challenge',
-          challengeId: challenge.id,
-          content: `Challenge: ${challenge.name}. Progress: ${challenge.completedDays}/${challenge.duration} days.`,
-          date: new Date().toISOString()
-        }
-      })
+      body: JSON.stringify(body),
     });
-
-    const responseText = await response.text();
-    console.log('Raw server response:', responseText);
-
+    const text = await response.text();
     if (!response.ok) {
-      throw new Error(`Server error: ${response.status} - ${responseText}`);
+      console.warn('[Pinecone] upsert HTTP', response.status, text.slice(0, 280));
+      return { ok: false };
     }
-
-    const result = JSON.parse(responseText);
-    console.log('Parsed server response:', result);
-    return result;
-  } catch (error) {
-    console.error('Detailed error in upsertChallengeData:', error);
-    throw error;
+    try {
+      return { ok: true, data: JSON.parse(text) as Record<string, unknown> };
+    } catch {
+      console.warn('[Pinecone] upsert response was not JSON');
+      return { ok: false };
+    }
+  } catch (e) {
+    console.warn('[Pinecone] upsert request failed:', e);
+    return { ok: false };
   }
 }
 
-// Function to upsert note data
+export async function upsertChallengeData(userId: string, challenge: Challenge): Promise<void> {
+  try {
+    const summary = `Challenge: ${challenge.name}. Progress: ${challenge.completedDays}/${challenge.duration} days.`;
+    const vector = await embedTextToVector(summary);
+    const res = await postUpsertPinecone({
+      userId,
+      vector,
+      metadata: {
+        type: 'challenge',
+        challengeId: challenge.id,
+        content: summary,
+        date: new Date().toISOString(),
+      },
+    });
+    if (!res.ok) {
+      console.warn('[Pinecone] challenge summary mirror skipped.');
+    }
+  } catch (e) {
+    console.warn('[Pinecone] upsertChallengeData skipped (embedding or backend):', e);
+  }
+}
+
 export async function upsertNoteData(
   userId: string,
   challengeId: string,
   dayNumber: number,
-  note: string | Note // Accept both for migration safety
-): Promise<{ vectorId: string }> {
-  // If note is a Note object, use its content
-  const noteContent = typeof note === 'string' ? note : note.content;
+  note: string | Note
+): Promise<{ vectorId?: string }> {
+  try {
+    const noteContent = typeof note === 'string' ? note : note.content;
+    const vector = await embedTextToVector(noteContent);
 
-  const vector = await getEmbedding(noteContent);
-
-  const response = await fetch('/api/upsert-pinecone', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+    const res = await postUpsertPinecone({
       userId,
       vector,
       metadata: {
@@ -75,37 +71,40 @@ export async function upsertNoteData(
         challengeId,
         dayNumber,
         content: noteContent,
-        date: new Date().toISOString()
-      }
-    })
-  });
+        date: new Date().toISOString(),
+      },
+    });
 
-  const responseText = await response.text();
-  if (!response.ok) {
-    throw new Error(`Server error: ${response.status} - ${responseText}`);
+    if (!res.ok) return {};
+    const vid = res.data.vectorId;
+    return typeof vid === 'string' ? { vectorId: vid } : {};
+  } catch (e) {
+    console.warn('[Pinecone] upsertNoteData skipped:', e);
+    return {};
   }
-
-  const result = JSON.parse(responseText);
-  // Return the vectorId so it can be stored in Firestore
-  return { vectorId: result.vectorId };
 }
 
-// Function to upsert daily reflection
-export async function upsertDailyReflection(userId: string, date: string, reflection: string) {
-  const vector = await getEmbedding(reflection);
-
-  await fetch('/api/upsert-pinecone', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+export async function upsertDailyReflection(
+  userId: string,
+  date: string,
+  reflection: string
+): Promise<void> {
+  try {
+    const vector = await embedTextToVector(reflection);
+    const res = await postUpsertPinecone({
       userId,
       vector,
       metadata: {
         type: 'reflection',
         date,
         content: reflection,
-        dateCreated: new Date().toISOString()
-      }
-    })
-  });
-} 
+        dateCreated: new Date().toISOString(),
+      },
+    });
+    if (!res.ok) {
+      console.warn('[Pinecone] daily reflection mirror skipped.');
+    }
+  } catch (e) {
+    console.warn('[Pinecone] upsertDailyReflection skipped:', e);
+  }
+}

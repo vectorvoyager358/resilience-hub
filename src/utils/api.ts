@@ -1,25 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Note } from '../types';
-
-const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY || '');
-
-async function getEmbedding(text: string): Promise<number[]> {
-  const model = genAI.getGenerativeModel({ model: "embedding-001" });
-  const result = await model.embedContent(text);
-  const embedding = result.embedding;
-  return embedding.values;
-}
-
-// Helper to build vectorId (if needed for legacy support)
-function buildVectorId(userId: string, type: string, challengeId?: string, dayNumber?: number) {
-  if (type === 'reflection') {
-    return `${userId}-reflection-${dayNumber}`;
-  } else if (type === 'challenge') {
-    return `${userId}-challenge-${challengeId}`;
-  } else {
-    return `${userId}-note-${challengeId}-${Date.now()}`;
-  }
-}
+import { embedTextToVector } from './embeddings';
 
 // Update the type definition to include 'prefix'
 type DeleteFromPineconeParams = {
@@ -42,7 +21,7 @@ export const upsertToPinecone = async (data: {
   // (Assume embedding is handled elsewhere if using pinecone.ts for upserts)
   const payload = {
     userId: data.userId,
-    vector: await getEmbedding(data.content), // If you use Gemini here
+    vector: await embedTextToVector(data.content), // If you use Gemini here
     metadata: {
       ...data.metadata,
       type: data.type,
@@ -70,6 +49,33 @@ export const upsertToPinecone = async (data: {
   // Return the vectorId so it can be stored in Firestore
   return await response.json();
 };
+
+/** Upsert without throwing — use when Pinecone/RAG is optional and Firestore is source of truth. */
+export async function tryUpsertToPinecone(
+  data: {
+    userId: string;
+    type: 'challenge' | 'note' | 'reflection';
+    content: string;
+    metadata: Record<string, any>;
+  }
+): Promise<string | undefined> {
+  try {
+    const res = await upsertToPinecone(data);
+    return typeof res.vectorId === 'string' ? res.vectorId : undefined;
+  } catch (e) {
+    console.warn('[Pinecone] Upsert failed; continuing without vector id.', e);
+    return undefined;
+  }
+}
+
+/** Delete without throwing (optional cleanup when index may be unreachable). */
+export async function tryDeleteFromPinecone(params: DeleteFromPineconeParams): Promise<void> {
+  try {
+    await deleteFromPinecone(params);
+  } catch (e) {
+    console.warn('[Pinecone] Delete failed; continuing.', e);
+  }
+}
 
 // Delete from Pinecone using vectorId or prefix
 export const deleteFromPinecone = async (params: DeleteFromPineconeParams) => {
@@ -111,25 +117,25 @@ export const updatePineconeNote = async (data: {
   metadata: Record<string, any>;
   oldVectorId?: string;
 }) => {
-  try {
-    // First delete the old vector using vectorId
-    if (data.oldVectorId) {
-      await deleteFromPinecone({ vectorId: data.oldVectorId });
-    }
-
-    // Then create new vector with updated content
-    const upsertResponse = await upsertToPinecone({
-      userId: data.userId,
-      type: data.type,
-      content: data.content,
-      metadata: data.metadata
-    });
-
-    return { status: 'success', message: 'Note updated in Pinecone', vectorId: upsertResponse.vectorId };
-  } catch (error) {
-    console.error('Error updating note in Pinecone:', error);
-    throw error;
+  if (data.oldVectorId) {
+    await tryDeleteFromPinecone({ vectorId: data.oldVectorId });
   }
-};
 
-// If you use getEmbedding here, import or define it as in pinecone.ts
+  const vectorId = await tryUpsertToPinecone({
+    userId: data.userId,
+    type: data.type,
+    content: data.content,
+    metadata: data.metadata
+  });
+
+  if (vectorId) {
+    return { status: 'success' as const, message: 'Note updated in Pinecone', vectorId };
+  }
+
+  console.warn('[Pinecone] updatePineconeNote: skipped upsert.');
+  return {
+    status: 'skipped' as const,
+    message: 'Pinecone unavailable — Firestore-only',
+    vectorId: data.oldVectorId ?? ''
+  };
+};

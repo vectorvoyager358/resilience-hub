@@ -53,7 +53,6 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-mui': ['@mui/material', '@mui/icons-material'],
           'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-          'vendor-utils': ['date-fns']
         }
       }
     }

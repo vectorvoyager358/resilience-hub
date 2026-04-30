@@ -25,7 +25,8 @@ import PersonIcon from '@mui/icons-material/Person';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SearchIcon from '@mui/icons-material/Search';
-import { User, Challenge} from '../types';
+import type { Challenge, User } from '../types';
+import { getLoggedStreakForChallenge, getChallengeCalendarDayIndex } from '../utils/challengeProgress';
 
 interface Message {
   id: string;
@@ -61,22 +62,11 @@ function getLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-const getTodayDayNumber = (challenge: any): number => {
-  const startDate = new Date(challenge.startDate);
-  const now = new Date();
-  
-  // Set both dates to start of day for accurate comparison
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const challengeStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-  
-  // Calculate days since start (floor to handle time differences)
-  const daysSinceStart = Math.floor((todayStart.getTime() - challengeStart.getTime()) / (1000 * 60 * 60 * 24));
-  
-  // Today's day number (1-indexed)
-  return daysSinceStart + 1;
-};
 
-// Add this function to fetch relevant context from Pinecone
+/**
+ * Retrieval (RAG): expects POST `/api/query-pinecone` on the Flask backend.
+ * Route is not implemented in `pinecone.py` yet; failures fall back to empty matches.
+ */
 const getRelevantContext = async (query: string, userId: string) => {
   try {
     const response = await fetch('/api/query-pinecone', {
@@ -117,51 +107,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   const [showCopyNotification, setShowCopyNotification] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Helper function to calculate streak for a challenge
-  const getStreakForChallenge = (challenge: any) => {
-    if (!challenge || !challenge.notes) return 0;
-    
-    // Get all completed days (keys are day numbers stored as strings)
-    const completedDayNumbers = Object.keys(challenge.notes)
-      .map(day => parseInt(day, 10))
-      .sort((a, b) => b - a); // Sort in descending order (most recent first)
-      
-    if (completedDayNumbers.length === 0) {
-      return 0;
-    }
-    
-    // Get current day number since start
-    const todayDayNumber = getTodayDayNumber(challenge);
-    
-    // Get the most recent completed day
-    const mostRecentCompletedDay = completedDayNumbers[0];
-    
-    // If most recent completion isn't today or yesterday, streak is broken
-    if (todayDayNumber - mostRecentCompletedDay > 1) {
-      return 0;
-    }
-    
-    // Start with streak of 1 for the most recent day
-    let streak = 1;
-    // Initialize the expected previous day
-    let expectedPreviousDay = mostRecentCompletedDay - 1;
-    
-    // Loop through all completed days (already sorted in descending order)
-    for (let i = 1; i < completedDayNumbers.length; i++) {
-      const completedDay = completedDayNumbers[i];
-      
-      // If this day matches the expected previous day, increment streak
-      if (completedDay === expectedPreviousDay) {
-        streak++;
-        expectedPreviousDay--; // Decrement for next iteration
-      } else {
-        // Break the streak - we hit a gap
-        break;
-      }
-    }
-    
-    return streak;
-  };
+
 
   // Get greeting based on time of day
   const getTimeBasedGreeting = () => {
@@ -317,7 +263,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
         name: userData?.name || 'User',
         challenges: (userData?.challenges || []).map(c => {
           // Get today's day number for this challenge
-          const todayDayNum = getTodayDayNumber(c);
+          const todayDayNum = getChallengeCalendarDayIndex(c);
           // Check if the challenge has a note for today's day number
           const hasLoggedToday = c.notes && c.notes[todayDayNum] !== undefined;
           
@@ -326,7 +272,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
             duration: c.duration,
             completedDays: c.completedDays,
             progress: Math.floor((c.completedDays / c.duration) * 100),
-            streak: getStreakForChallenge(c),
+            streak: getLoggedStreakForChallenge(c),
             hasLoggedToday: hasLoggedToday,
             lastLoggedDate: c.notes ? 
               Object.keys(c.notes)

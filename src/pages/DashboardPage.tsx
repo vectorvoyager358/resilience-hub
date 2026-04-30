@@ -92,13 +92,13 @@ import NotesHistoryPage from './NotesHistoryPage';
 import ClickAwayListener from '@mui/material/ClickAwayListener';
 import Fuse from 'fuse.js';
 import PeopleIcon from '@mui/icons-material/People';
-import { upsertToPinecone, deleteFromPinecone } from '../utils/api';
+import { tryUpsertToPinecone, deleteFromPinecone, tryDeleteFromPinecone } from '../utils/api';
 import { upsertChallengeData, upsertNoteData, upsertDailyReflection } from '../services/pinecone';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { updatePineconeNote } from '../utils/api';
 import { Note } from '../types';
-import { syncChallengeCompletedDays, getChallengeCalendarDayIndex, isChallengePastCalendarDuration, formatChallengeWindowEndCalendarDisplay } from '../utils/challengeProgress';
+import { syncChallengeCompletedDays, getChallengeCalendarDayIndex, isChallengePastCalendarDuration, formatChallengeWindowEndCalendarDisplay, normalizeUserChallenges, getLoggedStreakForChallenge } from '../utils/challengeProgress';
 
 interface MilestoneAchievement {
   percentage: number;
@@ -603,9 +603,8 @@ const DashboardPage: React.FC = () => {
         const userDoc = await getDoc(userDocRef);
         
         if (userDoc.exists()) {
-          const userData = userDoc.data() as User;
-          const challenges = (userData.challenges || []).map((c) => syncChallengeCompletedDays(c));
-          setUserData({ ...userData, challenges });
+          const raw = userDoc.data() as User;
+          setUserData(normalizeUserChallenges(raw));
         } else {
           // Initialize user data if it doesn't exist
           const initialData: User = {
@@ -664,58 +663,6 @@ const DashboardPage: React.FC = () => {
     return Math.min(dayNumber, challenge.duration);
   };
 
-  // Helper to calculate the current streak for a challenge
-  const getStreakForChallenge = (challenge: Challenge): number => {
-    if (!challenge.notes || Object.keys(challenge.notes).length === 0) {
-      return 0;
-    }
-
-    // Calendar slots inside the challenge window only
-    const completedDayNumbers = Object.keys(challenge.notes)
-      .map(day => parseInt(day, 10))
-      .filter(d => !Number.isNaN(d) && d >= 1 && d <= challenge.duration)
-      .sort((a, b) => b - a); // Sort in descending order (most recent first)
-      
-    if (completedDayNumbers.length === 0) {
-      return 0;
-    }
-    
-    // Get current day number since start
-    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
-    
-    // Get the most recent completed day
-    const mostRecentCompletedDay = completedDayNumbers[0];
-    
-    // If most recent completion isn't today or yesterday, streak is broken
-    if (todayDayNumber - mostRecentCompletedDay > 1) {
-      return 0;
-    }
-    
-    // Start with streak of 1 for the most recent day
-    let streak = 1;
-    // Initialize the expected previous day
-    let expectedPreviousDay = mostRecentCompletedDay - 1;
-    
-    // Loop through all completed days (already sorted in descending order)
-    for (let i = 1; i < completedDayNumbers.length; i++) {
-      const completedDay = completedDayNumbers[i];
-      
-      // If this day matches the expected previous day, increment streak
-      if (completedDay === expectedPreviousDay) {
-        streak++;
-        expectedPreviousDay--; // Decrement for next iteration
-      } else {
-        // Break the streak - we hit a gap
-        break;
-      }
-    }
-    
-    return streak;
-  };
-
-
-
-
 
   // Function to check and show milestone achievements
   const checkMilestoneAchievement = (challenge: Challenge) => {
@@ -734,7 +681,7 @@ const DashboardPage: React.FC = () => {
     }
 
     // Check for comeback (streak = 1 but not first day)
-    const streak = getStreakForChallenge(challenge);
+    const streak = getLoggedStreakForChallenge(challenge);
     if (streak === 1 && challenge.completedDays > 1) {
       // This is a comeback after breaking a streak
       setShowMilestone({
@@ -799,7 +746,7 @@ const DashboardPage: React.FC = () => {
     }
 
     try {
-      const upsertResponse = await upsertToPinecone({
+      const vectorId = await tryUpsertToPinecone({
         userId: currentUser.uid,
         type: 'note',
         content: note,
@@ -810,7 +757,6 @@ const DashboardPage: React.FC = () => {
           completionDate: new Date().toISOString(),
         }
       });
-      const vectorId = upsertResponse.vectorId;
 
       const updatedChallenges = userData.challenges.map(chItem => {
         if (chItem.id !== challengeId) return chItem;
@@ -818,7 +764,10 @@ const DashboardPage: React.FC = () => {
           ...chItem,
           notes: {
             ...(chItem.notes as Record<string, Note>),
-            [`${todayDayNumber}`]: { content: note.trim(), vectorId }
+            [`${todayDayNumber}`]: {
+              content: note.trim(),
+              ...(vectorId ? { vectorId } : {}),
+            },
           },
         };
         return syncChallengeCompletedDays(merged);
@@ -827,18 +776,19 @@ const DashboardPage: React.FC = () => {
       await updateChallenges(currentUser.uid, updatedChallenges);
 
       const fresh = updatedChallenges.find(c => c.id === challengeId);
-      if (fresh) {
-        await upsertChallengeData(currentUser.uid, fresh);
-        checkMilestoneAchievement(fresh);
-      }
 
       setUserData(prev => ({
         ...prev,
-        challenges: updatedChallenges
+        challenges: updatedChallenges,
       }));
 
       setNote('');
       setChallengeIdForNote(null);
+
+      if (fresh) {
+        checkMilestoneAchievement(fresh);
+        await upsertChallengeData(currentUser.uid, fresh);
+      }
     } catch (error) {
       console.error('Error marking challenge complete:', error);
       alert('Could not save today. Please try again.');
@@ -982,6 +932,15 @@ const DashboardPage: React.FC = () => {
       }
 
       const dayKey = `${logToDelete.day}`;
+      const rawDeletedNote = challengeToUpdate.notes[dayKey];
+      const deletedVectorId =
+        typeof rawDeletedNote === 'object' &&
+        rawDeletedNote &&
+        typeof (rawDeletedNote as Note).vectorId === 'string' &&
+        (rawDeletedNote as Note).vectorId
+          ? (rawDeletedNote as Note).vectorId
+          : undefined;
+
       const updatedChallenges = userData.challenges.map(challenge => {
         if (challenge.id === logToDelete.challengeId) {
           const newNotes = { ...challenge.notes };
@@ -994,27 +953,25 @@ const DashboardPage: React.FC = () => {
         return challenge;
       });
 
-      const pineconeParams = {
-        userId: currentUser.uid,
-        type: "note" as "note",
-        challengeId: logToDelete.challengeId,
-        dayNumber: logToDelete.day
-      };
-      console.log('[PINECONE][DELETE LOG] Pinecone params:', pineconeParams);
+      console.log('[PINECONE][DELETE LOG] Persisting removal to Firestore (source of truth)');
 
-      const [firestoreResult, pineconeResult] = await Promise.all([
-        updateChallenges(currentUser.uid, updatedChallenges),
-        deleteFromPinecone(pineconeParams)
-      ]);
-      console.log('[PINECONE][DELETE LOG] Firestore result:', firestoreResult);
-      console.log('[PINECONE][DELETE LOG] Pinecone result:', pineconeResult);
+      await updateChallenges(currentUser.uid, updatedChallenges);
 
-      setUserData(prev => ({ ...prev, challenges: updatedChallenges }));
+      setUserData(prev => ({
+        ...prev,
+        challenges: updatedChallenges,
+      }));
 
       const refreshed = updatedChallenges.find(c => c.id === logToDelete.challengeId);
       if (refreshed) {
         await upsertChallengeData(currentUser.uid, refreshed);
       }
+
+      if (deletedVectorId) {
+        await tryDeleteFromPinecone({ vectorId: deletedVectorId });
+      }
+
+      console.log('[PINECONE][DELETE LOG] Firestore committed; optional vector delete best-effort');
     } catch (error) {
       console.error('[PINECONE][DELETE LOG] Error:', error);
     }
@@ -1031,35 +988,37 @@ const DashboardPage: React.FC = () => {
     // If not, construct a prefix to match all possible vectors for this note
     const vectorPrefix = `${currentUser.uid}-note-${editChallengeId}-${editLogDay}`;
 
-    // 2. Delete the old vector(s)
-    await deleteFromPinecone({ prefix: vectorPrefix });
+    // 2–3. Best-effort Pinecone refresh (Firestore above is source of truth)
+    await tryDeleteFromPinecone({ prefix: vectorPrefix });
 
-    // 3. Upsert the new/edited note
     const challenge = userData.challenges.find(c => c.id === editChallengeId);
     if (challenge) {
       const oldNoteObj = challenge?.notes[editLogDay];
       if (oldNoteObj?.vectorId) {
-        await deleteFromPinecone({ vectorId: oldNoteObj.vectorId });
+        await tryDeleteFromPinecone({ vectorId: oldNoteObj.vectorId });
       }
-      const upsertResponse = await upsertToPinecone({
-        userId: currentUser.uid,
-        type: 'note',
-        content: editNote,
-        metadata: {
-          challengeId: editChallengeId,
-          challengeName: challenge.name,
-          dayNumber: editLogDay,
-          updateDate: new Date().toISOString(),
-        }
-      });
-      const newVectorId = upsertResponse.vectorId;
+      const newVectorId =
+        (await tryUpsertToPinecone({
+          userId: currentUser.uid,
+          type: 'note',
+          content: editNote,
+          metadata: {
+            challengeId: editChallengeId,
+            challengeName: challenge.name,
+            dayNumber: editLogDay,
+            updateDate: new Date().toISOString(),
+          }
+        })) ?? oldNoteObj?.vectorId;
       const updatedChallenges = userData.challenges.map(challenge => {
         if (challenge.id === editChallengeId) {
           return syncChallengeCompletedDays({
             ...challenge,
             notes: {
               ...challenge.notes,
-              [`${editLogDay}`]: { content: editNote, vectorId: newVectorId }
+              [`${editLogDay}`]: {
+                content: editNote,
+                ...(newVectorId ? { vectorId: newVectorId } : {}),
+              }
             } as Record<string, Note>,
           });
         }
@@ -1246,7 +1205,7 @@ const DashboardPage: React.FC = () => {
     }
 
     try {
-      const upsertResponse = await upsertToPinecone({
+      const vectorId = await tryUpsertToPinecone({
         userId: currentUser.uid,
         type: 'note',
         content: note,
@@ -1257,7 +1216,6 @@ const DashboardPage: React.FC = () => {
           completionDate: new Date().toISOString(),
         }
       });
-      const vectorId = upsertResponse.vectorId;
 
       const updatedChallenges = userData.challenges.map(c => {
         if (c.id !== selectedChallengeForNote.id) return c;
@@ -1265,7 +1223,10 @@ const DashboardPage: React.FC = () => {
           ...c,
           notes: {
             ...(c.notes as Record<string, Note>),
-            [`${todayDayNumber}`]: { content: note.trim(), vectorId },
+            [`${todayDayNumber}`]: {
+              content: note.trim(),
+              ...(vectorId ? { vectorId } : {}),
+            },
           },
         });
       });
@@ -1273,10 +1234,6 @@ const DashboardPage: React.FC = () => {
       await updateChallenges(currentUser.uid, updatedChallenges);
 
       const fresh = updatedChallenges.find(c => c.id === selectedChallengeForNote.id);
-      if (fresh) {
-        await upsertChallengeData(currentUser.uid, fresh);
-        checkMilestoneAchievement(fresh);
-      }
 
       setUserData(prev => ({
         ...prev,
@@ -1287,6 +1244,11 @@ const DashboardPage: React.FC = () => {
       setNote('');
       setChallengeIdForNote(null);
       setSelectedChallengeForNote(null);
+
+      if (fresh) {
+        checkMilestoneAchievement(fresh);
+        await upsertChallengeData(currentUser.uid, fresh);
+      }
     } catch (error) {
       console.error('Error saving note and completing challenge:', error);
       alert('Could not save. Please try again.');
@@ -1351,6 +1313,7 @@ const DashboardPage: React.FC = () => {
         type: 'note',
         id: `${editTodayChallengeId}_day${todayDayNumber}`,
         content: editTodayNote,
+        oldVectorId: prevVectorId || undefined,
         metadata: {
           challengeId: editTodayChallengeId,
           challengeName: challenge.name,
@@ -1870,7 +1833,7 @@ const DashboardPage: React.FC = () => {
                             />
                           
                           {(() => {
-                            const streak = getStreakForChallenge(challenge);
+                            const streak = getLoggedStreakForChallenge(challenge);
                             return (
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, mb: 1 }}>
                                 <LocalFireDepartmentIcon sx={{ color: streak > 0 ? 'orange' : 'grey.400', fontSize: 20 }} />
@@ -2042,7 +2005,7 @@ const DashboardPage: React.FC = () => {
             ) : (
             <Grid container spacing={3}>
               {userData.challenges.map((challenge) => {
-                const streak = getStreakForChallenge(challenge);
+                const streak = getLoggedStreakForChallenge(challenge);
                 const pastWindow = isChallengePastCalendarDuration(challenge);
                 const fullyFilled = challenge.completedDays >= challenge.duration;
                 return (
@@ -2141,7 +2104,7 @@ const DashboardPage: React.FC = () => {
             ) : (
               <Grid container spacing={3}>
                 {archivedChallenges.map((challenge) => {
-                  const streak = getStreakForChallenge(challenge);
+                  const streak = getLoggedStreakForChallenge(challenge);
                   const fullyFilled = challenge.completedDays >= challenge.duration;
                   return (
                     <Grid item xs={12} sm={6} md={4} key={challenge.id}>

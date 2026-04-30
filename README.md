@@ -20,7 +20,7 @@ npm install
      ```bash
      cp .env.example .env
      ```
-   - Fill in your Firebase configuration values in the `.env` file
+   - Fill in your Firebase keys and, if you use embeddings / Pinecone from the browser, `VITE_GEMINI_API_KEY` in `.env`
 
 4. Start the development server:
 ```bash
@@ -29,8 +29,11 @@ npm run dev
 
 ## Available Scripts
 
-- `npm run dev` - Start development server
-- `npm run build` - Create production build
+- `npm start` or `npm run dev` — Start the Vite dev server
+
+  Optional Flask API for Pinecone (default port 5001): `python app.py`. Python dependencies are not pinned in-repo; use `flask`, `flask-cors`, `python-dotenv`, and your Pinecone / embedding client packages as needed.
+
+- `npm run build` — Create production build
 - `npm run preview` - Preview production build
 - `npm run lint` - Run ESLint
 - `npm run lint:fix` - Fix ESLint issues
@@ -83,6 +86,7 @@ VITE_FIREBASE_PROJECT_ID=
 VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
+VITE_GEMINI_API_KEY=
 ```
 
 **Important:** Never commit your `.env` file to version control. The `.env.example` file serves as a template. 

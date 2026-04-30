@@ -1,0 +1,5 @@
+# Backend API (app.py → Flask + Pinecone)
+flask>=3.0,<4
+flask-cors>=4.0,<6
+python-dotenv>=1.0,<2
+pinecone-client>=5.0,<9

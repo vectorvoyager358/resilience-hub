@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 pinecone_routes = Blueprint('pinecone', __name__)
 
+# RAG / Chat assistant: client calls POST /api/query-pinecone (see ChatAssistant.getRelevantContext);
+# that route is not registered here yet—implement query + embedding + index.query with user filter.
+
 # Create a Pinecone client instance
 pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
 index = pc.Index(os.getenv('PINECONE_INDEX_NAME'))

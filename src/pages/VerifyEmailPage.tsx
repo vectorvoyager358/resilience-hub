@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -36,6 +36,7 @@ const VerifyEmailPage: React.FC = () => {
   const { currentUser, loading, sendVerificationEmail, refreshAuthUser, logout } = useAuth();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const navigate = useNavigate();
 
   if (loading) {
     return (
@@ -75,7 +76,8 @@ const VerifyEmailPage: React.FC = () => {
     try {
       await refreshAuthUser();
       if (auth.currentUser?.emailVerified) {
-        window.location.href = '/dashboard';
+        // Navigate via React Router so GitHub Pages subpath (`/<repo>/`) works.
+        navigate('/dashboard', { replace: true });
         return;
       }
       setMessage({

@@ -1,83 +1,95 @@
 # Resilience Hub
 
-A React application built with Vite, TypeScript, and Firebase for managing resilience challenges and personal growth.
+## What this app is
 
-## Setup Instructions
+**Resilience Hub** is a web app for tracking personal **resilience challenges**—habits or goals you commit to for a set number of days—and reflecting on your progress over time. You sign in, define challenges with a duration, log completed days on a calendar-style view, attach notes to days or challenges, and browse history. A **built-in chat assistant** (powered by Google Gemini) can answer in context of your journey; **vector search** (Pinecone) keeps challenge and note text synced so replies can draw on what you have actually written.
 
-1. Clone the repository:
+The experience is aimed at **solo use**: your data is scoped to your Firebase account. The UI is a single-page React app (Material UI) with  **installable PWA** support for a more app-like feel on mobile and desktop.
+
+## Features
+
+- **Accounts**: Email/password auth with Firebase, protected routes, profile and email verification flows.
+- **Challenges**: Create timed challenges, track progress by day, archive completed ones, milestones and gentle progress feedback.
+- **Journaling**: Daily and per-challenge notes, editing, search (including fuzzy search via Fuse.js), and a dedicated notes history area.
+- **Assistant chat**: Personalized greetings and suggested prompts based on your active challenges; uses Gemini for conversation.
+- **RAG-style context**: Embeddings (Gemini on the client) can be sent to a small Flask API that **upserts** and **deletes** vectors in Pinecone so the assistant can retrieve relevant snippets of your notes and challenge text. Core tracking still works in **Firestore** if the backend or Pinecone is unavailable.
+- **Progressive Web App**: Configured via `vite-plugin-pwa` with app manifest and icons.
+
+## Tech stack
+
+| Area | Technology |
+|------|------------|
+| Frontend | React 18, TypeScript, Vite, MUI, React Router, Framer Motion |
+| Auth & data | Firebase Authentication, Cloud Firestore |
+| AI | Google Generative AI (Gemini) for chat and text embeddings |
+| Vector store API | Flask + `pinecone-client` (`app.py`, `server/routes/`) |
+| Charts | Chart.js / react-chartjs-2 |
+
+## Local setup
+
+### 1. Clone and install (frontend)
+
 ```bash
 git clone <repository-url>
 cd resilience-hub
-```
-
-2. Install dependencies:
-```bash
 npm install
 ```
 
-3. Environment Variables Setup:
-   - Copy `.env.example` to a new file named `.env`:
-     ```bash
-     cp .env.example .env
-     ```
-   - Fill in your Firebase keys and, if you use embeddings / Pinecone from the browser, `VITE_GEMINI_API_KEY` in `.env`
+### 2. Environment variables (frontend)
 
-4. Start the development server:
+Copy the example file and fill in real values:
+
+```bash
+cp .env.example .env
+```
+
+At minimum, set the **Firebase** `VITE_*` variables so auth and Firestore work. For the chat assistant and client-side embeddings, set **`VITE_GEMINI_API_KEY`**. Do not commit `.env`.
+
+### 3. Run the Vite dev server
+
 ```bash
 npm run dev
 ```
 
-## Available Scripts
+The dev server defaults to port **5173** and proxies **`/api`** to **`http://localhost:5001`** (see `vite.config.ts`), so Pinecone routes work locally when the Flask app is running.
 
-- `npm start` or `npm run dev` — Start the Vite dev server
+### 4. Run the Flask API (optional, for Pinecone)
 
-  Optional Flask API for Pinecone (default port 5001): `python app.py`. Python dependencies are not pinned in-repo; use `flask`, `flask-cors`, `python-dotenv`, and your Pinecone / embedding client packages as needed.
+If you want vector upserts/deletes and richer assistant context:
 
-- `npm run build` — Create production build
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
-- `npm run lint:fix` - Fix ESLint issues
-- `npm run lint:watch` - Watch for ESLint issues
-
-## Deployment
-
-To deploy the application to Firebase Hosting:
-
-1. Install Firebase CLI globally:
 ```bash
-npm install -g firebase-tools
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-2. Login to Firebase:
-```bash
-firebase login
+Create or extend a **`.env`** file in the project root (same file as the frontend or a dedicated backend env—`app.py` uses `python-dotenv`) with:
+
+```env
+PINECONE_API_KEY=
+PINECONE_INDEX_NAME=
 ```
 
-3. Initialize Firebase in your project:
-```bash
-firebase init
-```
-- Select 'Hosting'
-- Choose your Firebase project
-- Use 'dist' as your public directory
-- Configure as a single-page app: Yes
-- Don't overwrite index.html: No
+Then start the server:
 
-4. Build the application:
 ```bash
-npm run build
+python app.py
 ```
 
-5. Deploy to Firebase:
-```bash
-firebase deploy
-```
+Health check: open `http://localhost:5001/api/test` or the root URL for a simple status message.
 
-Your app will be deployed to `https://<your-project-id>.web.app`
+## Available scripts
 
-## Environment Variables
+- `npm start` / `npm run dev` — Vite development server
+- `npm run build` — TypeScript check + production build to `dist/`
+- `npm run preview` — Preview the production build locally
+- `npm run lint` — ESLint
+- `npm run lint:fix` — ESLint with auto-fix
+- `npm run lint:watch` — ESLint in watch mode
 
-This project uses the following environment variables:
+## Environment variables reference
+
+**Frontend (Vite — `VITE_*` is exposed to the browser):**
 
 ```env
 VITE_FIREBASE_API_KEY=
@@ -89,4 +101,27 @@ VITE_FIREBASE_APP_ID=
 VITE_GEMINI_API_KEY=
 ```
 
-**Important:** Never commit your `.env` file to version control. The `.env.example` file serves as a template. 
+**Backend (Flask — server-side only, not prefixed with `VITE_`):**
+
+```env
+PINECONE_API_KEY=
+PINECONE_INDEX_NAME=
+```
+
+Never commit secrets; use `.env.example` as the template only.
+
+## Deployment
+
+The app can be hosted as static files (e.g. **`dist/`** after `npm run build`). Firebase Hosting is configured in-repo as one option.
+
+### Firebase Hosting
+
+1. Install the CLI: `npm install -g firebase-tools`
+2. Log in: `firebase login`
+3. If needed: `firebase init hosting` — public directory **`dist`**, SPA **yes**, do not overwrite `index.html` if prompted to keep your entry.
+4. Build: `npm run build`
+5. Deploy: `firebase deploy`
+
+The live URL will look like `https://<your-project-id>.web.app`.
+
+For production, point the frontend at your **real API base URL** for `/api` (or configure a reverse proxy) if the Flask service is not served from the same origin as the static site. CORS on `app.py` is currently broad for development; tighten `origins` before production.

@@ -4,7 +4,7 @@
 
 **Resilience Hub** is a web app for tracking personal **resilience challenges**—habits or goals you commit to for a set number of days—and reflecting on your progress over time. You sign in, define challenges with a duration, log completed days on a calendar-style view, attach notes to days or challenges, and browse history. A **built-in chat assistant** (powered by Google Gemini) can answer in context of your journey; **vector search** (Pinecone) keeps challenge and note text synced so replies can draw on what you have actually written.
 
-The experience is aimed at **solo use**: your data is scoped to your Firebase account. The UI is a single-page React app (Material UI) with  **installable PWA** support for a more app-like feel on mobile and desktop.
+The experience is aimed at **solo use**: your data is scoped to your Firebase account. The UI is a single-page React app (Material UI) with **installable PWA** support for a more app-like feel on mobile and desktop.
 
 ## Features
 
@@ -22,7 +22,7 @@ The experience is aimed at **solo use**: your data is scoped to your Firebase ac
 | Frontend | React 18, TypeScript, Vite, MUI, React Router, Framer Motion |
 | Auth & data | Firebase Authentication, Cloud Firestore |
 | AI | Google Generative AI (Gemini) for chat and text embeddings |
-| Vector store API | Flask + `pinecone-client` (`app.py`, `server/routes/`) |
+| Vector store API | Flask + `pinecone` (`app.py`, `server/routes/`) |
 | Charts | Chart.js / react-chartjs-2 |
 
 ## Local setup
@@ -106,6 +106,8 @@ VITE_GEMINI_API_KEY=
 ```env
 PINECONE_API_KEY=
 PINECONE_INDEX_NAME=
+# Optional: restrict CORS in production (comma-separated). Required for credentialed browser requests from a real origin (e.g. GitHub Pages).
+# ALLOWED_ORIGINS=https://YOURNAME.github.io/resilience-hub,http://localhost:5173
 ```
 
 Never commit secrets; use `.env.example` as the template only.
@@ -113,6 +115,50 @@ Never commit secrets; use `.env.example` as the template only.
 ## Deployment
 
 The app can be hosted as static files (e.g. **`dist/`** after `npm run build`). Firebase Hosting is configured in-repo as one option.
+
+### Google Cloud Run (Flask API)
+
+The repo includes a **`Dockerfile`** that builds only the Python API (`app.py` + `server/`). Below is what **you** need on your side, then a typical deploy flow.
+
+#### What you need
+
+1. **Google account** with a **GCP project** and [**billing enabled**](https://cloud.google.com/billing/docs/how-to/modify-project) (Cloud Run’s free tier still usually requires a billing account).
+2. **APIs turned on** (the console prompts you, or enable manually): **Cloud Run**, **Artifact Registry**, **Cloud Build**.
+3. [**Google Cloud SDK**](https://cloud.google.com/sdk/docs/install) (`gcloud`) installed locally, then:
+   - `gcloud auth login`
+   - `gcloud config set project YOUR_PROJECT_ID`
+4. **Secrets for the service**
+   - **`PINECONE_API_KEY`** and **`PINECONE_INDEX_NAME`** (same values you use locally). Prefer [Secret Manager](https://cloud.google.com/secret-manager) for the API key; at minimum set them as Cloud Run env vars in the console or via `--set-env-vars` (avoid logging them).
+5. **CORS**: The browser sends **cookies/credentials** with some `/api` calls. That **does not work** with `Access-Control-Allow-Origin: *`. Set **`ALLOWED_ORIGINS`** on the service to your real site origins, comma-separated, e.g. `https://YOURNAME.github.io`, `https://YOURNAME.github.io/resilience-hub`, and `http://localhost:5173` for local testing.
+6. **Frontend URL**: After deploy, note the **service URL** (e.g. `https://resilience-hub-api-xxxxx-uc.a.run.app`). The React app currently calls **`/api/...`** relative to the page origin. For GitHub Pages you will need a **full API base URL** in the frontend (e.g. a `VITE_` variable and `fetch` updates)—plan that when you ship the static site.
+
+#### Deploy from your machine (source build)
+
+From the **repository root** (where `Dockerfile` lives):
+
+```bash
+gcloud run deploy resilience-hub-api \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars "PINECONE_INDEX_NAME=your-index-name,ALLOWED_ORIGINS=https://YOURNAME.github.io"
+```
+
+Add **`PINECONE_API_KEY`** via the Cloud Run UI, or `--set-secrets` once the secret exists in Secret Manager, for example:
+
+```bash
+echo -n 'YOUR_PINECONE_KEY' | gcloud secrets create pinecone-api-key --data-file=-
+gcloud run deploy resilience-hub-api \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars "PINECONE_INDEX_NAME=your-index-name,ALLOWED_ORIGINS=https://YOURNAME.github.io" \
+  --set-secrets "PINECONE_API_KEY=pinecone-api-key:latest"
+```
+
+Replace **`us-central1`**, service name, index name, and origins with yours. First deploy may take several minutes while Cloud Build creates the image.
+
+Smoke test: `curl -sS "https://YOUR-SERVICE-URL/api/test"`.
 
 ### Firebase Hosting
 
@@ -124,4 +170,4 @@ The app can be hosted as static files (e.g. **`dist/`** after `npm run build`). 
 
 The live URL will look like `https://<your-project-id>.web.app`.
 
-For production, point the frontend at your **real API base URL** for `/api` (or configure a reverse proxy) if the Flask service is not served from the same origin as the static site. CORS on `app.py` is currently broad for development; tighten `origins` before production.
+If the API is on **Cloud Run**, set **`ALLOWED_ORIGINS`** on the backend to match your Firebase **or** GitHub Pages URL, and point the frontend at the Cloud Run base URL for `/api` routes (see the Cloud Run section above).

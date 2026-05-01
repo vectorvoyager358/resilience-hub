@@ -56,8 +56,8 @@ const LoginPage: React.FC = () => {
           localStorage.setItem('userData', userData);
         }
       
-        // Force navigation to dashboard
-        window.location.href = '/dashboard';
+        // Navigate via React Router so GitHub Pages subpath (`/<repo>/`) works.
+        navigate('/dashboard', { replace: true });
         
       } catch (error: unknown) {
         if (error instanceof Error && error.message === 'email-not-verified') {

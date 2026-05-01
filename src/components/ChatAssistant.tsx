@@ -313,7 +313,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
               .sort((a, b) => a.daysAgo - b.daysAgo) 
             : [],
         },
-        challengeNotes: (userData?.challenges || []).reduce((acc: Record<string, any>, challenge: Challenge) => {
+        challengeNotes: (userData?.challenges || []).reduce((acc: Record<string, unknown>, challenge: Challenge) => {
           if (challenge.notes) {
             acc[challenge.id] = challenge.notes;
           }
@@ -329,9 +329,20 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       Today's date is ${new Date().toLocaleDateString()}.
       
       Relevant past context:
-      ${relevantContext?.matches.map((match: any) => 
-        `- ${match.metadata.type}: ${match.content} (${new Date(match.metadata.date).toLocaleDateString()})`
-      ).join('\n') || 'No relevant past context found.'}
+      ${(
+        (relevantContext?.matches as unknown as Array<{ content?: unknown; metadata?: { type?: unknown; date?: unknown } }> | undefined) ??
+        []
+      )
+        .map((match) => {
+          const content = typeof match.content === 'string' ? match.content : '';
+          const t = match.metadata?.type;
+          const typeLabel = typeof t === 'string' ? t : 'context';
+          const d = match.metadata?.date;
+          const dateStr = typeof d === 'string' ? d : '';
+          const when = dateStr ? ` (${new Date(dateStr).toLocaleDateString()})` : '';
+          return `- ${typeLabel}: ${content}${when}`;
+        })
+        .join('\n') || 'No relevant past context found.'}
       
       Current user data: ${JSON.stringify(userDataContext)}
       

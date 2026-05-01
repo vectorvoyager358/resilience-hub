@@ -67,12 +67,17 @@ const LoginPage: React.FC = () => {
         
         throw error;
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Login error:", err);
+      const code = ((): string | undefined => {
+        if (!err || typeof err !== 'object') return undefined;
+        const c = (err as { code?: unknown }).code;
+        return typeof c === 'string' ? c : undefined;
+      })();
       setError(
-        err.code === 'auth/user-not-found' ? 'No account found with this email' :
-        err.code === 'auth/wrong-password' ? 'Incorrect password' :
-        err.code === 'auth/invalid-credential' ? 'Invalid email or password' :
+        code === 'auth/user-not-found' ? 'No account found with this email' :
+        code === 'auth/wrong-password' ? 'Incorrect password' :
+        code === 'auth/invalid-credential' ? 'Invalid email or password' :
         'Failed to sign in. Please try again.'
       );
     } finally {
@@ -93,11 +98,16 @@ const LoginPage: React.FC = () => {
       setResetSent(true);
       
       // Show success message but don't reset the form
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Password reset error:", err);
+      const code = ((): string | undefined => {
+        if (!err || typeof err !== 'object') return undefined;
+        const c = (err as { code?: unknown }).code;
+        return typeof c === 'string' ? c : undefined;
+      })();
       setError(
-        err.code === 'auth/user-not-found' ? 'No account found with this email' :
-        err.code === 'auth/invalid-email' ? 'Invalid email format' :
+        code === 'auth/user-not-found' ? 'No account found with this email' :
+        code === 'auth/invalid-email' ? 'Invalid email format' :
         'Failed to send reset email. Please try again.'
       );
     } finally {

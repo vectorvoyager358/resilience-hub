@@ -31,11 +31,11 @@ import {
   CircularProgress,
   Fab,
   Grow,
-  ButtonBase,
-  InputAdornment
+  ButtonBase
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -47,31 +47,16 @@ import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
 import MilitaryTechIcon from '@mui/icons-material/MilitaryTech';
 import StarIcon from '@mui/icons-material/Star';
 import DateRangeIcon from '@mui/icons-material/DateRange';
-import DirectionsRunIcon from '@mui/icons-material/DirectionsRun';
 import SelfImprovementIcon from '@mui/icons-material/SelfImprovement';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
-import SchoolIcon from '@mui/icons-material/School';
-import SpaIcon from '@mui/icons-material/Spa';
 import PsychologyIcon from '@mui/icons-material/Psychology';
-import VolunteerActivismIcon from '@mui/icons-material/VolunteerActivism';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
-import WaterDropIcon from '@mui/icons-material/WaterDrop';
-import NightlightIcon from '@mui/icons-material/Nightlight';
-import BrushIcon from '@mui/icons-material/Brush';
-import MusicNoteIcon from '@mui/icons-material/MusicNote';
 import CodeIcon from '@mui/icons-material/Code';
 import PaletteIcon from '@mui/icons-material/Palette';
-import SmartphoneIcon from '@mui/icons-material/Smartphone';
-import MobileOffIcon from '@mui/icons-material/MobileOff';
-import PrayIcon from '@mui/icons-material/Accessibility';
-import CleanHandsIcon from '@mui/icons-material/CleanHands';
 import ToothbrushIcon from '@mui/icons-material/Sanitizer';
 import ShowerIcon from '@mui/icons-material/Shower';
-import VapeFreeBrushIcon from '@mui/icons-material/SmokeFree';
-import SelfDisciplineIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
-import BlockIcon from '@mui/icons-material/Block';
 import LogoutIcon from '@mui/icons-material/Logout';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -80,20 +65,19 @@ import LocalDrinkIcon from '@mui/icons-material/LocalDrink';
 import HotelIcon from '@mui/icons-material/Hotel';
 import EmojiObjectsIcon from '@mui/icons-material/EmojiObjects';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { Challenge, User } from '../types';
 import TypingAnimation from '../components/TypingAnimation';
 import ChatAssistant from '../components/ChatAssistant';
 import { useAuth } from '../contexts/AuthContext';
-import { getUserData, updateChallenges, updateDailyNotes, createUserDocument } from '../services/firestore';
+import { updateChallenges, updateDailyNotes, createUserDocument } from '../services/firestore';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import NotesHistoryPage from './NotesHistoryPage';
 import ClickAwayListener from '@mui/material/ClickAwayListener';
 import Fuse from 'fuse.js';
 import PeopleIcon from '@mui/icons-material/People';
 import { tryUpsertToPinecone, tryDeleteFromPinecone } from '../utils/api';
-import { upsertChallengeData, upsertNoteData, upsertDailyReflection } from '../services/pinecone';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { upsertChallengeData, upsertDailyReflection } from '../services/pinecone';
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { updatePineconeNote } from '../utils/api';
 import { Note } from '../types';
@@ -179,7 +163,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
     return { hasError: true };
   }
 
-  componentDidCatch(error: any, errorInfo: any) {
+  componentDidCatch(error: unknown, errorInfo: unknown) {
     console.error("Error caught by ErrorBoundary:", error, errorInfo);
   }
 
@@ -460,12 +444,8 @@ const DashboardPage: React.FC = () => {
   });
   const [openDialog, setOpenDialog] = useState(false);
   const [dailyNoteDialog, setDailyNoteDialog] = useState(false);
-  const [editLogDialog, setEditLogDialog] = useState(false);
   const [newChallenge, setNewChallenge] = useState({ name: '', duration: '' });
   const [note, setNote] = useState('');
-  const [editNote, setEditNote] = useState('');
-  const [editChallengeId, setEditChallengeId] = useState<string | null>(null);
-  const [editLogDay, setEditLogDay] = useState<number | null>(null);
   const [dailyNote, setDailyNote] = useState('');
   const [challengeIdForNote, setChallengeIdForNote] = useState<string | null>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -533,44 +513,9 @@ const DashboardPage: React.FC = () => {
     { icon: <AddIcon />, name: 'Add Challenge', onClick: () => setOpenDialog(true) },
     { icon: <AccountCircleIcon />, name: 'Profile', onClick: () => navigate('/profile') },
     { icon: <DeleteIcon />, name: 'Delete All Daily Reflection Notes', onClick: () => setDeleteAllNotesDialogOpen(true), color: 'error' },
-    { icon: <DeleteIcon />, name: 'Delete All Challenges', onClick: () => setResetDialogOpen(true), color: 'error' },
+    { icon: <RefreshIcon />, name: 'Reset All Challenges', onClick: () => setResetDialogOpen(true), color: 'error' },
     { icon: <LogoutIcon />, name: 'Sign Out', onClick: handleSignOut }
   ];
-
-  // Add this function around line 615, just before loadUserData
-  const upsertHistoricalData = async (userData: User) => {
-    try {
-      console.log('Starting historical data upload...'); // Add this
-      // Upsert historical challenges
-      if (userData.challenges) {
-        console.log(`Uploading ${userData.challenges.length} challenges...`); // Add this
-        for (const challenge of userData.challenges) {
-          console.log(`Upserting challenge: ${challenge.name}`); // Add this
-          await upsertChallengeData(userData.uid, challenge);
-          
-          // Upsert historical notes for each challenge
-          if (challenge.notes) {
-            console.log(`Upserting ${Object.keys(challenge.notes).length} notes for challenge ${challenge.name}`); // Add this
-            for (const [dayNumber, noteObj] of Object.entries(challenge.notes)) {
-              // noteObj is of type Note
-              await upsertNoteData(userData.uid, challenge.id, parseInt(dayNumber), noteObj.content);
-            }
-          }
-        }
-      }
-
-      // Upsert historical daily reflections
-      if (userData.dailyNotes) {
-        console.log(`Upserting ${Object.keys(userData.dailyNotes).length} daily reflections...`); // Add this
-        for (const [date, reflection] of Object.entries(userData.dailyNotes)) {
-          await upsertDailyReflection(userData.uid, date, reflection);
-        }
-      }
-      console.log('Historical data upload complete!'); // Add this
-    } catch (error) {
-      console.error('Error upserting historical data:', error);
-    }
-  };
 
   // Load user data from Firestore
   useEffect(() => {
@@ -807,7 +752,7 @@ const DashboardPage: React.FC = () => {
 
     await tryDeleteFromPinecone({
       userId: currentUser.uid,
-      type: 'challenge' as 'challenge',
+      type: 'challenge',
       challengeId: idToRemove,
     });
 
@@ -829,32 +774,6 @@ const DashboardPage: React.FC = () => {
   const handleCloseLogMenu = () => {
     setMenuAnchorEl(null);
     setSelectedChallengeId(null);
-  };
-
-  // Open log edit dialog for a specific day
-  const handleEditLog = () => {
-    if (!selectedChallengeId) return;
-    
-    const challenge = userData.challenges.find(c => c.id === selectedChallengeId);
-    if (!challenge) return;
-    
-    // Find the most recently completed day
-    const completedDays = Object.keys(challenge.notes)
-      .map(day => parseInt(day, 10))
-      .sort((a, b) => b - a);
-    
-    if (completedDays.length === 0) {
-      alert("No completed days to edit");
-      return;
-    }
-    
-    const dayToEdit = completedDays[0];
-    
-    setEditChallengeId(selectedChallengeId);
-    setEditLogDay(dayToEdit);
-    setEditNote(challenge.notes[`${dayToEdit}`]?.content || '');
-    setEditLogDialog(true);
-    handleCloseLogMenu();
   };
 
   // Delete a log entry for a specific day
@@ -962,64 +881,6 @@ const DashboardPage: React.FC = () => {
     
     setDeleteLogDialogOpen(false);
     setLogToDelete(null);
-  };
-
-  // Save an edited log entry
-  const handleSaveEditedLog = async () => {
-    if (!currentUser || !editChallengeId || editLogDay === null) return;
-
-    // 1. Find the old vectorId (if you store it in Firestore, use that)
-    // If not, construct a prefix to match all possible vectors for this note
-    const vectorPrefix = `${currentUser.uid}-note-${editChallengeId}-${editLogDay}`;
-
-    // 2–3. Best-effort Pinecone refresh (Firestore above is source of truth)
-    await tryDeleteFromPinecone({ prefix: vectorPrefix });
-
-    const challenge = userData.challenges.find(c => c.id === editChallengeId);
-    if (challenge) {
-      const oldNoteObj = challenge?.notes[editLogDay];
-      if (oldNoteObj?.vectorId) {
-        await tryDeleteFromPinecone({ vectorId: oldNoteObj.vectorId });
-      }
-      const newVectorId =
-        (await tryUpsertToPinecone({
-          userId: currentUser.uid,
-          type: 'note',
-          content: editNote,
-          metadata: {
-            challengeId: editChallengeId,
-            challengeName: challenge.name,
-            dayNumber: editLogDay,
-            updateDate: new Date().toISOString(),
-          }
-        })) ?? oldNoteObj?.vectorId;
-      const updatedChallenges = userData.challenges.map(challenge => {
-        if (challenge.id === editChallengeId) {
-          return syncChallengeCompletedDays({
-            ...challenge,
-            notes: {
-              ...challenge.notes,
-              [`${editLogDay}`]: {
-                content: editNote,
-                ...(newVectorId ? { vectorId: newVectorId } : {}),
-              }
-            } as Record<string, Note>,
-          });
-        }
-        return challenge;
-      });
-      await updateChallenges(currentUser.uid, updatedChallenges);
-      const fresh = updatedChallenges.find(c => c.id === editChallengeId);
-      if (fresh) {
-        await upsertChallengeData(currentUser.uid, fresh);
-      }
-      setUserData(prev => ({ ...prev, challenges: updatedChallenges }));
-    }
-
-    setEditLogDialog(false);
-    setEditChallengeId(null);
-    setEditLogDay(null);
-    setEditNote('');
   };
 
   const handleDeleteAllChallenges = async () => {
@@ -1131,21 +992,25 @@ const DashboardPage: React.FC = () => {
     delete updatedDailyNotes[todayKey];
 
     try {
+      // Firestore is the source of truth; Pinecone cleanup is best-effort.
       await updateDailyNotes(currentUser.uid, updatedDailyNotes);
+
+      // Update local state immediately
+      setUserData(prev => ({
+        ...prev,
+        dailyNotes: updatedDailyNotes,
+      }));
+      setDeleteNoteDialogOpen(false);
+
+      // Best-effort Pinecone cleanup (don't block UI on failures / misconfig).
+      await tryDeleteFromPinecone({
+        userId: currentUser.uid,
+        type: 'reflection',
+        vectorId: `reflection_${todayKey}`,
+      });
     } catch (error) {
-      console.error('Error deleting daily note from Firestore:', error);
-      return;
+      console.error('Error deleting daily note:', error);
     }
-
-    setUserData(prev => ({
-      ...prev,
-      dailyNotes: updatedDailyNotes,
-    }));
-    setDeleteNoteDialogOpen(false);
-
-    await tryDeleteFromPinecone({
-      vectorId: `reflection_${todayKey}`,
-    });
   };
 
   // Handler for opening note dialog (unused but kept for future use)
@@ -2373,7 +2238,7 @@ const DashboardPage: React.FC = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Delete all challenges */}
+        {/* Reset All Dialog */}
         <Dialog
           open={resetDialogOpen}
           onClose={() => setResetDialogOpen(false)}
@@ -2381,19 +2246,19 @@ const DashboardPage: React.FC = () => {
             sx: { borderRadius: 3, maxWidth: '500px', width: '100%' }
           }}
         >
-          <DialogTitle sx={{ color: 'error.main' }}>Delete all challenges?</DialogTitle>
+          <DialogTitle sx={{ color: 'error.main' }}>Reset All Challenges</DialogTitle>
           <DialogContent>
             <Alert severity="warning" sx={{ mb: 2 }}>
-              This cannot be undone.
+              This action cannot be undone!
             </Alert>
             <Typography>
-              This removes every challenge and its logged days from your account.
+              Are you sure you want to reset all challenges? This will delete all of your challenges and it&apos;s progress.
             </Typography>
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 3 }}>
             <Button onClick={() => setResetDialogOpen(false)} variant="outlined">Cancel</Button>
             <Button onClick={handleDeleteAllChallenges} color="error" variant="contained">
-              Delete all challenges
+              Reset All Challenges
             </Button>
           </DialogActions>
         </Dialog>

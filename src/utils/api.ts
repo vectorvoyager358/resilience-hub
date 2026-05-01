@@ -16,7 +16,7 @@ export const upsertToPinecone = async (data: {
   userId: string;
   type: 'challenge' | 'note' | 'reflection';
   content: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }) => {
   // Generate embedding from content
   // (Assume embedding is handled elsewhere if using pinecone.ts for upserts)
@@ -57,7 +57,7 @@ export async function tryUpsertToPinecone(
     userId: string;
     type: 'challenge' | 'note' | 'reflection';
     content: string;
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
   }
 ): Promise<string | undefined> {
   try {
@@ -80,17 +80,15 @@ export async function tryDeleteFromPinecone(params: DeleteFromPineconeParams): P
 
 // Delete from Pinecone using vectorId or prefix
 export const deleteFromPinecone = async (params: DeleteFromPineconeParams) => {
-  let requestBody: any = {};
-  if (params.vectorId) {
-    requestBody.vectorId = params.vectorId;
-  } else if (params.prefix) {
-    requestBody.prefix = params.prefix;
-  } else if (params.userId && params.type && params.challengeId) {
-    // Fallback for legacy support
-    requestBody.prefix = `${params.userId}-${params.type}-${params.challengeId}`;
-  } else {
-    throw new Error('Must provide vectorId or prefix for deletion');
-  }
+  const requestBody: { vectorId?: string; prefix?: string } = params.vectorId
+    ? { vectorId: params.vectorId }
+    : params.prefix
+      ? { prefix: params.prefix }
+      : params.userId && params.type && params.challengeId
+        ? { prefix: `${params.userId}-${params.type}-${params.challengeId}` }
+        : (() => {
+            throw new Error('Must provide vectorId or prefix for deletion');
+          })();
 
   const response = await fetch(apiUrl('/api/delete-pinecone'), {
     method: 'POST',
@@ -116,7 +114,7 @@ export const updatePineconeNote = async (data: {
   type: 'challenge' | 'note' | 'reflection';
   id: string;
   content: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   oldVectorId?: string;
 }) => {
   if (data.oldVectorId) {

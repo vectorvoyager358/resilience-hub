@@ -1,0 +1,30 @@
+# E2E smoke tests against deployed GitHub Pages.
+name: E2E (Playwright)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * *" # daily 09:00 UTC
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm install --include=optional --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E smoke tests (GitHub Pages)
+        env:
+          PLAYWRIGHT_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: npm run e2e
+

@@ -46,7 +46,7 @@ export function isChallengePastCalendarDuration(challenge: Challenge): boolean {
 type NotesBag = { [day: string]: Note | string | undefined };
 
 /** Coerce legacy string notes into `{ content, vectorId }` shape. */
-export function migrateNotes(notes: { [key: string]: any }): { [key: string]: Note } {
+export function migrateNotes(notes: { [key: string]: unknown }): { [key: string]: Note } {
   const migrated: { [key: string]: Note } = {};
   for (const [day, value] of Object.entries(notes || {})) {
     if (typeof value === 'string') {
@@ -112,7 +112,7 @@ export function getLoggedStreakForChallenge(challenge: Challenge): number {
 }
 
 export function syncChallengeCompletedDays(challenge: Challenge): Challenge {
-  const notes = migrateNotes(challenge.notes as { [key: string]: any });
+  const notes = migrateNotes(challenge.notes as { [key: string]: unknown });
   const completedDays = countFilledDaysInWindowFromNotes(notes, challenge.duration);
   return { ...challenge, notes, completedDays };
 }

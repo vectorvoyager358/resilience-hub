@@ -109,7 +109,7 @@ const ProfilePage: React.FC = () => {
       try {
         const credential = EmailAuthProvider.credential(currentUser.email!, oldPassword);
         await reauthenticateWithCredential(currentUser, credential);
-      } catch (error) {
+      } catch {
         setError('Current password is incorrect');
         setLoading(false);
         return;
@@ -124,7 +124,7 @@ const ProfilePage: React.FC = () => {
       setOldPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
-    } catch (error) {
+    } catch {
       setError('Failed to update password. Please try again.');
     } finally {
       setLoading(false);

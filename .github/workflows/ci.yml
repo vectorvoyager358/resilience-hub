@@ -1,0 +1,28 @@
+# Frontend CI: run unit/integration tests on pushes and PRs.
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm install --include=optional --no-audit --no-fund
+
+      - name: Test
+        run: npm run test:run
+
+      - name: Build (sanity)
+        run: npm run build
+

@@ -14,12 +14,22 @@ function viteAppBase(): string {
 
 const base = viteAppBase();
 
+function workboxMode(): 'production' | 'development' {
+  // On Node 23, Workbox's SW bundling sometimes trips an "Unexpected early exit" in terser.
+  // Dev mode avoids terser minification and makes builds reliable across Node versions.
+  const major = Number(process.versions.node.split('.')[0] || 0);
+  return major >= 22 ? 'development' : 'production';
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   base,
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        mode: workboxMode(),
+      },
       manifest: {
         name: 'Resilience Hub',
         short_name: 'Resilience',

@@ -86,9 +86,9 @@ const WelcomePage: React.FC = () => {
             background: 'linear-gradient(135deg, rgba(255,255,255,1) 0%, rgba(245,248,255,1) 100%)'
           }}
         >
-          <Grid container spacing={4} justifyContent="center">
+          <Grid container spacing={4} alignItems="center" justifyContent="center">
             <Grid item xs={12} sm={11} md={9}>
-              <Box sx={{ mb: 4, textAlign: 'center' }}>
+              <Box sx={{ mb: 0, textAlign: 'center' }}>
                 <Avatar 
                   sx={{ 
                     width: 64, 
@@ -132,7 +132,14 @@ const WelcomePage: React.FC = () => {
                 <Typography variant="body1" color="text.secondary" sx={{ mb: 4, maxWidth: 480, mx: 'auto', lineHeight: 1.7 }}>
                   Build healthy habits, track your progress, and become your best self through the power of consistency.
                 </Typography>
-                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, justifyContent: 'center' }}>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    flexDirection: { xs: 'column', sm: 'row' },
+                    gap: 2,
+                  }}
+                >
                   <Button 
                     variant="contained" 
                     size="large"
@@ -141,6 +148,7 @@ const WelcomePage: React.FC = () => {
                     sx={{ 
                       py: 1.5, 
                       px: 3,
+                      minWidth: 160,
                       bgcolor: '#2ec4b6',
                       '&:hover': {
                         bgcolor: '#2a9d8f'
@@ -157,6 +165,7 @@ const WelcomePage: React.FC = () => {
                     sx={{ 
                       py: 1.5, 
                       px: 3,
+                      minWidth: 160,
                       borderColor: '#ff9f1c',
                       color: '#ff9f1c',
                       '&:hover': {

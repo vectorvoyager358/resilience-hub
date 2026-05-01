@@ -27,7 +27,7 @@ jobs:
           cache: npm
 
       - name: Install
-        run: npm ci --include=optional
+        run: npm install --include=optional --no-audit --no-fund
 
       - name: Build
         env:

@@ -27,9 +27,7 @@ jobs:
           cache: npm
 
       - name: Install
-        run: |
-          npm config set optional true
-          npm ci --include=optional
+        run: npm ci --include=optional
 
       - name: Build
         env:

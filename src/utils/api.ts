@@ -1,4 +1,5 @@
 import { embedTextToVector } from './embeddings';
+import { apiUrl } from './apiBase';
 
 // Update the type definition to include 'prefix'
 type DeleteFromPineconeParams = {
@@ -31,7 +32,7 @@ export const upsertToPinecone = async (data: {
     }
   };
 
-  const response = await fetch('/api/upsert-pinecone', {
+  const response = await fetch(apiUrl('/api/upsert-pinecone'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -91,12 +92,13 @@ export const deleteFromPinecone = async (params: DeleteFromPineconeParams) => {
     throw new Error('Must provide vectorId or prefix for deletion');
   }
 
-  const response = await fetch('/api/delete-pinecone', {
+  const response = await fetch(apiUrl('/api/delete-pinecone'), {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
       'Accept': 'application/json'
     },
+    credentials: 'include',
     body: JSON.stringify(requestBody),
   });
 

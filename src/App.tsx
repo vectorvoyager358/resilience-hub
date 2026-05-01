@@ -64,6 +64,13 @@ const theme = createTheme({
   },
 });
 
+/** GitHub Pages project site lives under `/repo-name/`; Vite sets `import.meta.env.BASE_URL` from `base`. */
+function routerBasename(): string | undefined {
+  const b = import.meta.env.BASE_URL;
+  if (b === '/' || b === '') return undefined;
+  return b.endsWith('/') ? b.slice(0, -1) : b;
+}
+
 function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +144,7 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <Router>
+        <Router basename={routerBasename()}>
           <Suspense fallback={<PageLoader />}>
             <Routes>
               {/* Authentication Routes - Redirect to dashboard if already logged in */}

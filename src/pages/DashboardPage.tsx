@@ -802,34 +802,34 @@ const DashboardPage: React.FC = () => {
 
   const confirmDeleteChallenge = async () => {
     if (!currentUser || !challengeToDelete) return;
-    
+
+    const idToRemove = challengeToDelete;
     const updatedChallenges = userData.challenges.filter(
-      challenge => challenge.id !== challengeToDelete
+      challenge => challenge.id !== idToRemove
     );
 
     try {
-      // First update Firestore
       await updateChallenges(currentUser.uid, updatedChallenges);
-
-      // Delete the challenge vector
-      await deleteFromPinecone({
-        userId: currentUser.uid,
-        type: 'challenge' as 'challenge',
-        challengeId: challengeToDelete
-      });
-
-      // Delete all notes vectors for this challenge
-      await deleteFromPinecone({
-        prefix: `${currentUser.uid}-note-${challengeToDelete}-`
-      });
-
-      setUserData(prev => ({
-        ...prev,
-        challenges: updatedChallenges
-      }));
     } catch (error) {
-      console.error('[PINECONE][DELETE CHALLENGE] Error:', error);
+      console.error('[DELETE CHALLENGE] Firestore:', error);
+      alert('Could not delete challenge from your account. Please try again.');
+      return;
     }
+
+    setUserData(prev => ({
+      ...prev,
+      challenges: updatedChallenges,
+    }));
+
+    await tryDeleteFromPinecone({
+      userId: currentUser.uid,
+      type: 'challenge' as 'challenge',
+      challengeId: idToRemove,
+    });
+
+    await tryDeleteFromPinecone({
+      prefix: `${currentUser.uid}-note-${idToRemove}-`,
+    });
 
     setDeleteDialogOpen(false);
     setChallengeToDelete(null);

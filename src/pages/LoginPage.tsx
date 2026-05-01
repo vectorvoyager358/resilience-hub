@@ -133,6 +133,20 @@ const LoginPage: React.FC = () => {
           >
             <LocalFireDepartmentIcon fontSize="large" />
           </Avatar>
+          <Typography
+            component="p"
+            sx={{
+              m: 0,
+              mb: 1.25,
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              letterSpacing: '0.28em',
+              textTransform: 'uppercase',
+              color: 'text.secondary',
+            }}
+          >
+            Habits · Growth · Balance
+          </Typography>
           <Typography 
             variant="h5" 
             component="h1" 

@@ -29,6 +29,9 @@ jobs:
       - name: Install
         run: npm install --include=optional --no-audit --no-fund
 
+      - name: Ensure Rollup native bindings (Linux)
+        run: npm install --no-audit --no-fund --save-dev @rollup/rollup-linux-x64-gnu
+
       - name: Build
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/

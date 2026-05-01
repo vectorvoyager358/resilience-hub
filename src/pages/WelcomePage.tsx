@@ -56,15 +56,30 @@ const WelcomePage: React.FC = () => {
   return (
     <Container maxWidth="md">
       <Box sx={{ 
+        position: 'relative',
         minHeight: '100vh', 
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'center', 
-        py: 6 
+        py: 6,
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 'min(100%, 520px)',
+          height: 140,
+          pointerEvents: 'none',
+          background: 'radial-gradient(ellipse at 50% 0%, rgba(46, 196, 182, 0.12) 0%, transparent 72%)',
+          zIndex: 0,
+        },
       }}>
         <Paper 
           elevation={3} 
           sx={{ 
+            position: 'relative',
+            zIndex: 1,
             p: { xs: 3, sm: 4, md: 5 }, 
             borderRadius: 3, 
             width: '100%',
@@ -85,6 +100,20 @@ const WelcomePage: React.FC = () => {
                 >
                   <LocalFireDepartmentIcon sx={{ fontSize: 40 }} />
                 </Avatar>
+                <Typography
+                  component="p"
+                  sx={{
+                    m: 0,
+                    mb: 1.25,
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.28em',
+                    textTransform: 'uppercase',
+                    color: 'text.secondary',
+                  }}
+                >
+                  Habits · Growth · Balance
+                </Typography>
                 <Typography 
                   variant="h4" 
                   component="h1" 
@@ -100,10 +129,9 @@ const WelcomePage: React.FC = () => {
                 >
                   Resilience Hub
                 </Typography>
-                <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
+                <Typography variant="body1" color="text.secondary" sx={{ mb: 4, maxWidth: 480, mx: 'auto', lineHeight: 1.7 }}>
                   Build healthy habits, track your progress, and become your best self through the power of consistency.
                 </Typography>
-                
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, justifyContent: 'center' }}>
                   <Button 
                     variant="contained" 

@@ -20,7 +20,6 @@ import {
   Fade,
   Zoom,
   Stack,
-  ButtonBase,
   Button,
   Dialog,
   DialogTitle,
@@ -30,7 +29,6 @@ import {
   CircularProgress,
   Alert
 } from '@mui/material';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
@@ -604,27 +602,6 @@ const NotesHistoryPage: React.FC = () => {
                   <EditNoteIcon sx={{ fontSize: 40 }} />
                 </Avatar>
                 <Typography variant="h6">No daily reflections yet</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 400 }}>
-                  Your daily reflections will appear here once you start recording your thoughts. 
-                  Head back to the dashboard and click on the note icon to add your first reflection.
-                </Typography>
-                <ButtonBase 
-                  onClick={() => navigate('/dashboard')}
-                  sx={{
-                    mt: 2,
-                    color: 'primary.main',
-                    fontWeight: 600,
-                    fontSize: '0.9rem',
-                    borderRadius: 2,
-                    padding: '8px 16px',
-                    '&:hover': {
-                      bgcolor: 'rgba(58, 134, 255, 0.08)',
-                    }
-                  }}
-                >
-                  <ArrowBackIcon fontSize="small" sx={{ mr: 1 }} />
-                  Back to Dashboard
-                </ButtonBase>
               </Box>
             )}
           </TabPanel>

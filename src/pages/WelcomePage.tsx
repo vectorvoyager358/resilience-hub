@@ -71,16 +71,16 @@ const WelcomePage: React.FC = () => {
             background: 'linear-gradient(135deg, rgba(255,255,255,1) 0%, rgba(245,248,255,1) 100%)'
           }}
         >
-          <Grid container spacing={4} alignItems="center">
-            <Grid item xs={12} md={6}>
-              <Box sx={{ mb: 4, textAlign: { xs: 'center', md: 'left' } }}>
+          <Grid container spacing={4} justifyContent="center">
+            <Grid item xs={12} sm={11} md={9}>
+              <Box sx={{ mb: 4, textAlign: 'center' }}>
                 <Avatar 
                   sx={{ 
                     width: 64, 
                     height: 64, 
                     bgcolor: '#2ec4b6',
                     mb: 2,
-                    mx: { xs: 'auto', md: 0 }
+                    mx: 'auto'
                   }}
                 >
                   <LocalFireDepartmentIcon sx={{ fontSize: 40 }} />
@@ -104,7 +104,7 @@ const WelcomePage: React.FC = () => {
                   Build healthy habits, track your progress, and become your best self through the power of consistency.
                 </Typography>
                 
-                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, justifyContent: 'center' }}>
                   <Button 
                     variant="contained" 
                     size="large"
@@ -141,20 +141,6 @@ const WelcomePage: React.FC = () => {
                   </Button>
                 </Box>
               </Box>
-            </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Box 
-                component="img"
-                src="/habits-illustration.svg"
-                alt="Habit tracking illustration"
-                sx={{
-                  width: '100%',
-                  height: 'auto',
-                  maxHeight: 320,
-                  display: { xs: 'none', md: 'block' }
-                }}
-              />
             </Grid>
           </Grid>
         </Paper>

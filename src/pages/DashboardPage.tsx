@@ -36,7 +36,6 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -92,7 +91,7 @@ import NotesHistoryPage from './NotesHistoryPage';
 import ClickAwayListener from '@mui/material/ClickAwayListener';
 import Fuse from 'fuse.js';
 import PeopleIcon from '@mui/icons-material/People';
-import { tryUpsertToPinecone, deleteFromPinecone, tryDeleteFromPinecone } from '../utils/api';
+import { tryUpsertToPinecone, tryDeleteFromPinecone } from '../utils/api';
 import { upsertChallengeData, upsertNoteData, upsertDailyReflection } from '../services/pinecone';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
@@ -530,26 +529,11 @@ const DashboardPage: React.FC = () => {
     }
   };
 
-  // Function to delete all records from Pinecone
-  const handleDeleteAllPineconeRecords = async () => {
-    if (!currentUser) return;
-    try {
-      // Delete all records by using the user ID as prefix
-      await deleteFromPinecone({ prefix: currentUser.uid });
-      alert('All Pinecone records have been deleted successfully!');
-    } catch (error) {
-      console.error('Error deleting Pinecone records:', error);
-      alert('Failed to delete Pinecone records. Please try again.');
-    }
-  };
-
-  // Define menu actions
   const menuActions = [
     { icon: <AddIcon />, name: 'Add Challenge', onClick: () => setOpenDialog(true) },
     { icon: <AccountCircleIcon />, name: 'Profile', onClick: () => navigate('/profile') },
-    { icon: <RefreshIcon />, name: 'Reset All Challenges', onClick: () => setResetDialogOpen(true), color: 'error' },
     { icon: <DeleteIcon />, name: 'Delete All Daily Reflection Notes', onClick: () => setDeleteAllNotesDialogOpen(true), color: 'error' },
-    { icon: <DeleteIcon />, name: 'Delete All Pinecone Records', onClick: handleDeleteAllPineconeRecords, color: 'error' },
+    { icon: <DeleteIcon />, name: 'Delete All Challenges', onClick: () => setResetDialogOpen(true), color: 'error' },
     { icon: <LogoutIcon />, name: 'Sign Out', onClick: handleSignOut }
   ];
 
@@ -1038,7 +1022,7 @@ const DashboardPage: React.FC = () => {
     setEditNote('');
   };
 
-  const handleResetAll = async () => {
+  const handleDeleteAllChallenges = async () => {
     if (!currentUser) return;
 
     try {
@@ -1051,7 +1035,7 @@ const DashboardPage: React.FC = () => {
       setResetDialogOpen(false);
       navigate('/dashboard');
     } catch (error) {
-      console.error('Error resetting user data:', error);
+      console.error('Error deleting all challenges:', error);
     }
   };
 
@@ -1145,27 +1129,23 @@ const DashboardPage: React.FC = () => {
     const todayKey = getLocalDateKey();
     const updatedDailyNotes = { ...userData.dailyNotes };
     delete updatedDailyNotes[todayKey];
-    
-    try {
-      // Update Firestore and delete from Pinecone in parallel
-      await Promise.all([
-        updateDailyNotes(currentUser.uid, updatedDailyNotes),
-        deleteFromPinecone({
-          userId: currentUser.uid,
-          type: 'reflection',
-          vectorId: `reflection_${todayKey}`
-        })
-      ]);
 
-      // Update local state
-      setUserData(prev => ({
-        ...prev,
-        dailyNotes: updatedDailyNotes
-      }));
-      setDeleteNoteDialogOpen(false);
+    try {
+      await updateDailyNotes(currentUser.uid, updatedDailyNotes);
     } catch (error) {
-      console.error('Error deleting daily note:', error);
+      console.error('Error deleting daily note from Firestore:', error);
+      return;
     }
+
+    setUserData(prev => ({
+      ...prev,
+      dailyNotes: updatedDailyNotes,
+    }));
+    setDeleteNoteDialogOpen(false);
+
+    await tryDeleteFromPinecone({
+      vectorId: `reflection_${todayKey}`,
+    });
   };
 
   // Handler for opening note dialog (unused but kept for future use)
@@ -2393,7 +2373,7 @@ const DashboardPage: React.FC = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Reset All Dialog */}
+        {/* Delete all challenges */}
         <Dialog
           open={resetDialogOpen}
           onClose={() => setResetDialogOpen(false)}
@@ -2401,19 +2381,19 @@ const DashboardPage: React.FC = () => {
             sx: { borderRadius: 3, maxWidth: '500px', width: '100%' }
           }}
         >
-          <DialogTitle sx={{ color: 'error.main' }}>Reset All Challenges</DialogTitle>
+          <DialogTitle sx={{ color: 'error.main' }}>Delete all challenges?</DialogTitle>
           <DialogContent>
             <Alert severity="warning" sx={{ mb: 2 }}>
-              This action cannot be undone!
+              This cannot be undone.
             </Alert>
             <Typography>
-              Are you sure you want to reset all challenges? This will delete all of your challenges and it's progress.
+              This removes every challenge and its logged days from your account.
             </Typography>
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 3 }}>
             <Button onClick={() => setResetDialogOpen(false)} variant="outlined">Cancel</Button>
-            <Button onClick={handleResetAll} color="error" variant="contained">
-              Reset All Challenges
+            <Button onClick={handleDeleteAllChallenges} color="error" variant="contained">
+              Delete all challenges
             </Button>
           </DialogActions>
         </Dialog>

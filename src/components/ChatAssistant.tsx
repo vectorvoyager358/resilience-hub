@@ -27,6 +27,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SearchIcon from '@mui/icons-material/Search';
 import type { Challenge, User } from '../types';
 import { getLoggedStreakForChallenge, getChallengeCalendarDayIndex } from '../utils/challengeProgress';
+import { apiUrl } from '../utils/apiBase';
 
 interface Message {
   id: string;
@@ -69,11 +70,12 @@ function getLocalDateKey(date = new Date()) {
  */
 const getRelevantContext = async (query: string, userId: string) => {
   try {
-    const response = await fetch('/api/query-pinecone', {
+    const response = await fetch(apiUrl('/api/query-pinecone'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify({
         userId,
         query,

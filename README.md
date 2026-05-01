@@ -99,7 +99,13 @@ VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
 VITE_GEMINI_API_KEY=
+VITE_API_BASE_URL=
+VITE_BASE_PATH=
 ```
+
+**`VITE_API_BASE_URL`**: Cloud Run URL for the Flask API (no trailing slash). Leave empty locally so `/api` uses the Vite proxy.
+
+**`VITE_BASE_PATH`**: Public path when not hosted at domain root (e.g. `/resilience-hub/` for GitHub Pages project sites). Leave empty for local dev.
 
 **Backend (Flask — server-side only, not prefixed with `VITE_`):**
 
@@ -130,7 +136,7 @@ The repo includes a **`Dockerfile`** that builds only the Python API (`app.py` +
 4. **Secrets for the service**
    - **`PINECONE_API_KEY`** and **`PINECONE_INDEX_NAME`** (same values you use locally). Prefer [Secret Manager](https://cloud.google.com/secret-manager) for the API key; at minimum set them as Cloud Run env vars in the console or via `--set-env-vars` (avoid logging them).
 5. **CORS**: The browser sends **cookies/credentials** with some `/api` calls. That **does not work** with `Access-Control-Allow-Origin: *`. Set **`ALLOWED_ORIGINS`** on the service to your real site origins, comma-separated, e.g. `https://YOURNAME.github.io`, `https://YOURNAME.github.io/resilience-hub`, and `http://localhost:5173` for local testing.
-6. **Frontend URL**: After deploy, note the **service URL** (e.g. `https://resilience-hub-api-xxxxx-uc.a.run.app`). The React app currently calls **`/api/...`** relative to the page origin. For GitHub Pages you will need a **full API base URL** in the frontend (e.g. a `VITE_` variable and `fetch` updates)—plan that when you ship the static site.
+6. **Frontend URL**: Set **`VITE_API_BASE_URL`** in the static build to your Cloud Run origin (no trailing slash). The app uses it for all `/api/...` calls when not same-origin.
 
 #### Deploy from your machine (source build)
 
@@ -160,6 +166,24 @@ Replace **`us-central1`**, service name, index name, and origins with yours. Fir
 
 Smoke test: `curl -sS "https://YOUR-SERVICE-URL/api/test"`.
 
+### GitHub Pages
+
+Static hosting uses [**GitHub Actions**](.github/workflows/deploy-pages.yml): build output is uploaded to Pages (**source: GitHub Actions** in repo settings).
+
+1. **Settings → Pages → Build and deployment** — set **Source** to **GitHub Actions**.
+2. **Settings → Secrets and variables → Actions**
+   - **Secrets**: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_GEMINI_API_KEY`.
+   - **Variables**: `VITE_API_BASE_URL` = Cloud Run service URL (no trailing slash).
+3. **Cloud Run**: set **`ALLOWED_ORIGINS`** to `https://YOUR_USER.github.io,https://YOUR_USER.github.io/YOUR_REPO,http://localhost:5173` (adjust user/repo).
+4. **Firebase → Authentication → Authorized domains**: add **`github.io`**.
+5. Push to **`main`** or **`master`**, or run the workflow manually.
+
+The workflow sets `VITE_BASE_PATH` to `/<repo>/` automatically. Local subpath check:
+
+```bash
+VITE_BASE_PATH=/resilience-hub/ npm run build && npm run preview
+```
+
 ### Firebase Hosting
 
 1. Install the CLI: `npm install -g firebase-tools`
@@ -170,4 +194,4 @@ Smoke test: `curl -sS "https://YOUR-SERVICE-URL/api/test"`.
 
 The live URL will look like `https://<your-project-id>.web.app`.
 
-If the API is on **Cloud Run**, set **`ALLOWED_ORIGINS`** on the backend to match your Firebase **or** GitHub Pages URL, and point the frontend at the Cloud Run base URL for `/api` routes (see the Cloud Run section above).
+If the API is on **Cloud Run**, set **`ALLOWED_ORIGINS`** on the backend and **`VITE_API_BASE_URL`** in the frontend build (GitHub Actions variable or local `.env`).

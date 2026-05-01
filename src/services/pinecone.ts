@@ -1,4 +1,5 @@
 import { Challenge, Note } from '../types';
+import { apiUrl } from '../utils/apiBase';
 import { embedTextToVector } from '../utils/embeddings';
 
 /** Pinecone mirror only — failures must not block Firestore or UI */
@@ -7,11 +8,12 @@ async function postUpsertPinecone(body: object): Promise<{
   data: Record<string, unknown>;
 } | { ok: false }> {
   try {
-    const response = await fetch('/api/upsert-pinecone', {
+    const response = await fetch(apiUrl('/api/upsert-pinecone'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify(body),
     });
     const text = await response.text();

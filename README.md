@@ -176,7 +176,7 @@ Static hosting uses [**GitHub Actions**](.github/workflows/deploy-pages.yml): bu
    - **Variables**: `VITE_API_BASE_URL` = Cloud Run service URL (no trailing slash).
 3. **Cloud Run**: set **`ALLOWED_ORIGINS`** to `https://YOUR_USER.github.io,https://YOUR_USER.github.io/YOUR_REPO,http://localhost:5173` (adjust user/repo).
 4. **Firebase → Authentication → Authorized domains**: add **`github.io`**.
-5. Push to **`main`** or **`master`**, or run the workflow manually.
+5. Push to **`main`**, or run the workflow manually.
 
 The workflow sets `VITE_BASE_PATH` to `/<repo>/` automatically. Local subpath check:
 

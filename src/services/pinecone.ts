@@ -1,4 +1,5 @@
 import { Challenge, Note } from '../types';
+import { getChallengeCadence } from '../utils/challengeProgress';
 import { apiUrl } from '../utils/apiBase';
 import { embedTextToVector } from '../utils/embeddings';
 
@@ -35,7 +36,9 @@ async function postUpsertPinecone(body: object): Promise<{
 
 export async function upsertChallengeData(userId: string, challenge: Challenge): Promise<void> {
   try {
-    const summary = `Challenge: ${challenge.name}. Progress: ${challenge.completedDays}/${challenge.duration} days.`;
+    const cadence = getChallengeCadence(challenge);
+    const unit = cadence === 'weekly' ? 'weeks' : 'days';
+    const summary = `Challenge: ${challenge.name} (${cadence}). Progress: ${challenge.completedDays}/${challenge.duration} ${unit}.`;
     const vector = await embedTextToVector(summary);
     const res = await postUpsertPinecone({
       userId,

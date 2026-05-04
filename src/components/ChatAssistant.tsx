@@ -26,7 +26,12 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SearchIcon from '@mui/icons-material/Search';
 import type { Challenge, User } from '../types';
-import { getLoggedStreakForChallenge, getChallengeCalendarDayIndex } from '../utils/challengeProgress';
+import {
+  getLoggedStreakForChallenge,
+  getChallengeCadence,
+  hasCompletedCurrentNoteSlot,
+  getWeeklySlotLocalDateRange,
+} from '../utils/challengeProgress';
 import { apiUrl } from '../utils/apiBase';
 
 interface Message {
@@ -264,27 +269,29 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       const userDataContext = {
         name: userData?.name || 'User',
         challenges: (userData?.challenges || []).map(c => {
-          // Get today's day number for this challenge
-          const todayDayNum = getChallengeCalendarDayIndex(c);
-          // Check if the challenge has a note for today's day number
-          const hasLoggedToday = c.notes && c.notes[todayDayNum] !== undefined;
-          
+          const hasLoggedCurrentPeriod = hasCompletedCurrentNoteSlot(c);
           return {
             name: c.name,
+            cadence: getChallengeCadence(c),
             duration: c.duration,
             completedDays: c.completedDays,
             progress: Math.floor((c.completedDays / c.duration) * 100),
             streak: getLoggedStreakForChallenge(c),
-            hasLoggedToday: hasLoggedToday,
-            lastLoggedDate: c.notes ? 
-              Object.keys(c.notes)
-                .sort((a, b) => parseInt(b) - parseInt(a))
-                .map(dayNum => {
-                  const date = new Date(c.startDate);
-                  date.setDate(date.getDate() + parseInt(dayNum) - 1);
-                  return date.toISOString();
-                })[0] || null 
-              : null
+            hasLoggedCurrentPeriod,
+            lastLoggedDate: c.notes
+              ? Object.keys(c.notes)
+                  .sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
+                  .map((slotStr) => {
+                    const slot = parseInt(slotStr, 10);
+                    if (getChallengeCadence(c) === 'weekly') {
+                      const { end } = getWeeklySlotLocalDateRange(c, slot);
+                      return end.toISOString();
+                    }
+                    const date = new Date(c.startDate);
+                    date.setDate(date.getDate() + slot - 1);
+                    return date.toISOString();
+                  })[0] || null
+              : null,
           };
         }),
         hasReflectionToday: Boolean(userData?.dailyNotes && userData.dailyNotes[todayKey]),

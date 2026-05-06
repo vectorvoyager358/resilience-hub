@@ -65,7 +65,18 @@ try {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = (event.notification.data as { url?: string } | undefined)?.url ?? '/dashboard';
+  const rawUrl = (event.notification.data as { url?: string } | undefined)?.url ?? '/dashboard';
+  const base = import.meta.env.BASE_URL || '/';
+
+  // GitHub Pages serves the app under a subpath (BASE_URL), so normalize clicks
+  // to open within the app base.
+  const normalizedPath = (() => {
+    if (/^https?:\/\//i.test(rawUrl)) return rawUrl;
+    const trimmedBase = base.endsWith('/') ? base : `${base}/`;
+    const trimmedPath = rawUrl.startsWith('/') ? rawUrl.slice(1) : rawUrl;
+    return `${trimmedBase}${trimmedPath}`;
+  })();
+  const absoluteUrl = new URL(normalizedPath, self.location.origin).toString();
 
   event.waitUntil(
     (async () => {
@@ -77,12 +88,12 @@ self.addEventListener('notificationclick', (event) => {
       for (const client of allClients) {
         if ('focus' in client) {
           await (client as WindowClient).focus();
-          (client as WindowClient).navigate(url);
+          (client as WindowClient).navigate(absoluteUrl);
           return;
         }
       }
 
-      await self.clients.openWindow(url);
+      await self.clients.openWindow(absoluteUrl);
     })()
   );
 });

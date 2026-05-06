@@ -26,7 +26,13 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SearchIcon from '@mui/icons-material/Search';
 import type { Challenge, User } from '../types';
-import { getLoggedStreakForChallenge, getChallengeCalendarDayIndex } from '../utils/challengeProgress';
+import {
+  getLoggedStreakForChallenge,
+  getChallengeCadence,
+  hasCompletedCurrentNoteSlot,
+  getWeeklySlotLocalDateRange,
+} from '../utils/challengeProgress';
+import { apiUrl } from '../utils/apiBase';
 
 interface Message {
   id: string;
@@ -69,11 +75,12 @@ function getLocalDateKey(date = new Date()) {
  */
 const getRelevantContext = async (query: string, userId: string) => {
   try {
-    const response = await fetch('/api/query-pinecone', {
+    const response = await fetch(apiUrl('/api/query-pinecone'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify({
         userId,
         query,
@@ -262,27 +269,29 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       const userDataContext = {
         name: userData?.name || 'User',
         challenges: (userData?.challenges || []).map(c => {
-          // Get today's day number for this challenge
-          const todayDayNum = getChallengeCalendarDayIndex(c);
-          // Check if the challenge has a note for today's day number
-          const hasLoggedToday = c.notes && c.notes[todayDayNum] !== undefined;
-          
+          const hasLoggedCurrentPeriod = hasCompletedCurrentNoteSlot(c);
           return {
             name: c.name,
+            cadence: getChallengeCadence(c),
             duration: c.duration,
             completedDays: c.completedDays,
             progress: Math.floor((c.completedDays / c.duration) * 100),
             streak: getLoggedStreakForChallenge(c),
-            hasLoggedToday: hasLoggedToday,
-            lastLoggedDate: c.notes ? 
-              Object.keys(c.notes)
-                .sort((a, b) => parseInt(b) - parseInt(a))
-                .map(dayNum => {
-                  const date = new Date(c.startDate);
-                  date.setDate(date.getDate() + parseInt(dayNum) - 1);
-                  return date.toISOString();
-                })[0] || null 
-              : null
+            hasLoggedCurrentPeriod,
+            lastLoggedDate: c.notes
+              ? Object.keys(c.notes)
+                  .sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
+                  .map((slotStr) => {
+                    const slot = parseInt(slotStr, 10);
+                    if (getChallengeCadence(c) === 'weekly') {
+                      const { end } = getWeeklySlotLocalDateRange(c, slot);
+                      return end.toISOString();
+                    }
+                    const date = new Date(c.startDate);
+                    date.setDate(date.getDate() + slot - 1);
+                    return date.toISOString();
+                  })[0] || null
+              : null,
           };
         }),
         hasReflectionToday: Boolean(userData?.dailyNotes && userData.dailyNotes[todayKey]),
@@ -311,7 +320,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
               .sort((a, b) => a.daysAgo - b.daysAgo) 
             : [],
         },
-        challengeNotes: (userData?.challenges || []).reduce((acc: Record<string, any>, challenge: Challenge) => {
+        challengeNotes: (userData?.challenges || []).reduce((acc: Record<string, unknown>, challenge: Challenge) => {
           if (challenge.notes) {
             acc[challenge.id] = challenge.notes;
           }
@@ -327,9 +336,20 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       Today's date is ${new Date().toLocaleDateString()}.
       
       Relevant past context:
-      ${relevantContext?.matches.map((match: any) => 
-        `- ${match.metadata.type}: ${match.content} (${new Date(match.metadata.date).toLocaleDateString()})`
-      ).join('\n') || 'No relevant past context found.'}
+      ${(
+        (relevantContext?.matches as unknown as Array<{ content?: unknown; metadata?: { type?: unknown; date?: unknown } }> | undefined) ??
+        []
+      )
+        .map((match) => {
+          const content = typeof match.content === 'string' ? match.content : '';
+          const t = match.metadata?.type;
+          const typeLabel = typeof t === 'string' ? t : 'context';
+          const d = match.metadata?.date;
+          const dateStr = typeof d === 'string' ? d : '';
+          const when = dateStr ? ` (${new Date(dateStr).toLocaleDateString()})` : '';
+          return `- ${typeLabel}: ${content}${when}`;
+        })
+        .join('\n') || 'No relevant past context found.'}
       
       Current user data: ${JSON.stringify(userDataContext)}
       

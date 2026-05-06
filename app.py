@@ -9,13 +9,17 @@ load_dotenv()
 # Flask app
 app = Flask(__name__)
 
-# Add more permissive CORS settings for debugging
+# CORS: comma-separated origins, or omit / empty for "*" (local dev).
+# For GitHub Pages + credentialed fetch, set e.g. ALLOWED_ORIGINS=https://YOU.github.io/resilience-hub,http://localhost:5173
+_allowed_raw = os.environ.get("ALLOWED_ORIGINS", "").strip()
+_cors_origins = [o.strip() for o in _allowed_raw.split(",") if o.strip()] if _allowed_raw else "*"
+
 CORS(app, resources={
-    r"/*": {  # Changed from /api/* to /* for testing
-        "origins": "*",  # More permissive for testing
+    r"/*": {
+        "origins": _cors_origins,
         "methods": ["GET", "POST", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Accept"],
-        "supports_credentials": True
+        "supports_credentials": True,
     }
 })
 
@@ -37,4 +41,6 @@ def home():
     return "RAG backend is running!"
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5001, debug=True, use_reloader=False)
+    _port = int(os.environ.get("PORT", "5001"))
+    _debug = os.environ.get("FLASK_DEBUG", "1").lower() in ("1", "true", "yes")
+    app.run(host="0.0.0.0", port=_port, debug=_debug, use_reloader=False)

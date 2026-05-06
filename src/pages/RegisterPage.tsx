@@ -88,12 +88,17 @@ const RegisterPage: React.FC = () => {
       await createUserDocument(user.uid, userData);
 
       navigate('/verify-email', { replace: true });
-    } catch (err: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+    } catch (err: unknown) {
       console.error("Registration error:", err);
+      const code = ((): string | undefined => {
+        if (!err || typeof err !== 'object') return undefined;
+        const c = (err as { code?: unknown }).code;
+        return typeof c === 'string' ? c : undefined;
+      })();
       setError(
-        err.code === 'auth/email-already-in-use' ? 'Email is already in use' :
-        err.code === 'auth/invalid-email' ? 'Invalid email address' :
-        err.code === 'auth/weak-password' ? 'Password is too weak' :
+        code === 'auth/email-already-in-use' ? 'Email is already in use' :
+        code === 'auth/invalid-email' ? 'Invalid email address' :
+        code === 'auth/weak-password' ? 'Password is too weak' :
         'Failed to create account. Please try again.'
       );
     } finally {

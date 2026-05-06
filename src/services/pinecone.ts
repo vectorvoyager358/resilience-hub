@@ -1,4 +1,6 @@
 import { Challenge, Note } from '../types';
+import { getChallengeCadence } from '../utils/challengeProgress';
+import { apiUrl } from '../utils/apiBase';
 import { embedTextToVector } from '../utils/embeddings';
 
 /** Pinecone mirror only — failures must not block Firestore or UI */
@@ -7,11 +9,12 @@ async function postUpsertPinecone(body: object): Promise<{
   data: Record<string, unknown>;
 } | { ok: false }> {
   try {
-    const response = await fetch('/api/upsert-pinecone', {
+    const response = await fetch(apiUrl('/api/upsert-pinecone'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify(body),
     });
     const text = await response.text();
@@ -33,7 +36,9 @@ async function postUpsertPinecone(body: object): Promise<{
 
 export async function upsertChallengeData(userId: string, challenge: Challenge): Promise<void> {
   try {
-    const summary = `Challenge: ${challenge.name}. Progress: ${challenge.completedDays}/${challenge.duration} days.`;
+    const cadence = getChallengeCadence(challenge);
+    const unit = cadence === 'weekly' ? 'weeks' : 'days';
+    const summary = `Challenge: ${challenge.name} (${cadence}). Progress: ${challenge.completedDays}/${challenge.duration} ${unit}.`;
     const vector = await embedTextToVector(summary);
     const res = await postUpsertPinecone({
       userId,

@@ -2,9 +2,28 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import { VitePWA } from 'vite-plugin-pwa';
 
+/** Vite `base` for asset URLs. `/` locally; for GitHub Pages project sites use `/repo-name/`. */
+function viteAppBase(): string {
+  const raw = process.env.VITE_BASE_PATH;
+  if (raw == null || raw.trim() === '') return '/';
+  const t = raw.trim();
+  if (t === '/') return '/';
+  const withLeading = t.startsWith('/') ? t : `/${t}`;
+  return withLeading.endsWith('/') ? withLeading : `${withLeading}/`;
+}
+
+const base = viteAppBase();
+
+function workboxMode(): 'production' | 'development' {
+  // On Node 23, Workbox's SW bundling sometimes trips an "Unexpected early exit" in terser.
+  // Dev mode avoids terser minification and makes builds reliable across Node versions.
+  const major = Number(process.versions.node.split('.')[0] || 0);
+  return major >= 22 ? 'development' : 'production';
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base,
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
@@ -18,7 +37,7 @@ export default defineConfig({
       manifest: {
         name: 'Resilience Hub',
         short_name: 'Resilience',
-        start_url: '.',
+        start_url: base === '/' ? '.' : base,
         display: 'standalone',
         background_color: '#ffffff',
         theme_color: '#2ec4b6',

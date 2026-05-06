@@ -24,6 +24,10 @@ export interface User {
   name: string;
   challenges: Challenge[];
   dailyNotes: Record<string, string>;
+  timezone?: string;
+  fcmTokens?: string[];
+  lastReminderSentLocalDate?: string;
+  pushRemindersEnabled?: boolean;
 }
 
 export interface ChatAssistantProps {

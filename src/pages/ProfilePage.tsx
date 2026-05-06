@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Container,
   Paper,
@@ -15,7 +15,9 @@ import {
   CircularProgress,
   Stack,
   InputAdornment,
-  IconButton
+  IconButton,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import { alpha, type Theme } from '@mui/material/styles';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
@@ -25,11 +27,13 @@ import EditIcon from '@mui/icons-material/Edit';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import { EmailAuthProvider, reauthenticateWithCredential, updateProfile } from 'firebase/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { updateUserData, getUserData } from '../services/firestore';
 import { upsertChallengeData } from '../services/pinecone';
 import { useNavigate } from 'react-router-dom';
+import { ensureWebPushEnabled } from '../services/push';
 
 const ProfilePage: React.FC = () => {
   const { currentUser, updatePassword } = useAuth();
@@ -64,6 +68,30 @@ const ProfilePage: React.FC = () => {
     special: true
   });
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
+  const [pushRemindersEnabled, setPushRemindersEnabled] = useState(true);
+  const [pushLoading, setPushLoading] = useState(false);
+
+  useEffect(() => {
+    const uid = currentUser?.uid;
+    if (!uid) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = await getUserData(uid);
+        if (cancelled) return;
+        if (data && typeof data.pushRemindersEnabled === 'boolean') {
+          setPushRemindersEnabled(data.pushRemindersEnabled);
+        }
+      } catch {
+        // best-effort
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.uid]);
 
   // Password validation function
   const validatePassword = (password: string) => {
@@ -419,6 +447,56 @@ const ProfilePage: React.FC = () => {
                     Change password
                   </Box>
                 </Button>
+              </Stack>
+            </Box>
+
+            <Box sx={fieldShellSx}>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Box sx={iconWrapSx}>
+                  <NotificationsActiveIcon sx={{ fontSize: 20 }} />
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                    Daily reminders
+                  </Typography>
+                  <Typography variant="subtitle2" sx={{ mt: 0.25, color: 'text.secondary' }}>
+                    Send a push reminder 2 hours before midnight if today’s challenges aren’t logged.
+                  </Typography>
+                </Box>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={pushRemindersEnabled}
+                      onChange={async (_e, checked) => {
+                        if (!currentUser?.uid) return;
+                        setError('');
+                        setSuccess('');
+                        setPushLoading(true);
+                        try {
+                          await updateUserData(currentUser.uid, { pushRemindersEnabled: checked });
+                          setPushRemindersEnabled(checked);
+
+                          if (checked) {
+                            // Allow a fresh attempt from toggle.
+                            localStorage.removeItem(`pushSetupAttempted:${currentUser.uid}`);
+                            await ensureWebPushEnabled(currentUser.uid);
+                          }
+
+                          setSuccess(checked ? 'Daily reminders enabled.' : 'Daily reminders disabled.');
+                        } catch (e) {
+                          console.error('Failed to update reminder preference:', e);
+                          setError('Failed to update reminder preference. Please try again.');
+                        } finally {
+                          setPushLoading(false);
+                        }
+                      }}
+                      disabled={pushLoading || loading}
+                      inputProps={{ 'aria-label': 'Enable daily reminders' }}
+                    />
+                  }
+                  label=""
+                  sx={{ m: 0 }}
+                />
               </Stack>
             </Box>
           </Stack>

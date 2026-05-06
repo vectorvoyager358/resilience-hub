@@ -75,6 +75,7 @@ import TypingAnimation from '../components/TypingAnimation';
 import ChatAssistant from '../components/ChatAssistant';
 import { useAuth } from '../contexts/AuthContext';
 import { updateChallenges, updateDailyNotes, createUserDocument } from '../services/firestore';
+import { ensureWebPushEnabled } from '../services/push';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import NotesHistoryPage from './NotesHistoryPage';
 import ClickAwayListener from '@mui/material/ClickAwayListener';
@@ -589,6 +590,14 @@ const DashboardPage: React.FC = () => {
 
     loadUserData();
   }, [currentUser, navigate]);
+
+  // Best-effort: store timezone + push token for reminders (won't block UI).
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    ensureWebPushEnabled(currentUser.uid).catch((e) => {
+      console.warn('Push enablement failed:', e);
+    });
+  }, [currentUser?.uid]);
 
   useEffect(() => {
     if (!hasShownWelcome) {

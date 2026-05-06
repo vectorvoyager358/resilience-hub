@@ -197,8 +197,9 @@ def send_daily_reminders():
         title = "Resilience Hub reminder"
         body = "Pending challenges: " + ", ".join(incomplete[:8]) + ("…" if len(incomplete) > 8 else "")
 
+        # Data-only message to avoid duplicate notifications on some clients.
+        # The service worker (web/PWA) will display the notification.
         message = messaging.MulticastMessage(
-            notification=messaging.Notification(title=title, body=body),
             data={"url": "/dashboard", "title": title, "body": body},
             tokens=tokens,
         )

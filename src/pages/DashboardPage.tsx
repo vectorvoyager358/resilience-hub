@@ -31,7 +31,12 @@ import {
   CircularProgress,
   Fab,
   Grow,
-  ButtonBase
+  ButtonBase,
+  FormControl,
+  FormControlLabel,
+  FormLabel,
+  Radio,
+  RadioGroup
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -70,6 +75,7 @@ import TypingAnimation from '../components/TypingAnimation';
 import ChatAssistant from '../components/ChatAssistant';
 import { useAuth } from '../contexts/AuthContext';
 import { updateChallenges, updateDailyNotes, createUserDocument } from '../services/firestore';
+import { ensureWebPushEnabled } from '../services/push';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import NotesHistoryPage from './NotesHistoryPage';
 import ClickAwayListener from '@mui/material/ClickAwayListener';
@@ -81,7 +87,27 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { updatePineconeNote } from '../utils/api';
 import { Note } from '../types';
-import { syncChallengeCompletedDays, getChallengeCalendarDayIndex, isChallengePastCalendarDuration, formatChallengeWindowEndCalendarDisplay, normalizeUserChallenges, getLoggedStreakForChallenge } from '../utils/challengeProgress';
+import {
+  syncChallengeCompletedDays,
+  getChallengeNoteSlotIndex,
+  getCurrentSlotDisplayIndex,
+  isWithinChallengeNoteWindow,
+  isChallengePastCalendarDuration,
+  formatChallengeWindowEndCalendarDisplay,
+  normalizeUserChallenges,
+  getLoggedStreakForChallenge,
+  getChallengeCadence,
+  hasCompletedCurrentNoteSlot,
+  getWeeklySlotLocalDateRange,
+  getChallengeDurationFieldLabel,
+  formatCadenceLabel,
+  type ChallengeCadence,
+} from '../utils/challengeProgress';
+
+const DAILY_DURATION_MIN = 10;
+const DAILY_DURATION_MAX = 365;
+const WEEKLY_DURATION_MIN = 2;
+const WEEKLY_DURATION_MAX = 104;
 
 interface MilestoneAchievement {
   percentage: number;
@@ -444,7 +470,11 @@ const DashboardPage: React.FC = () => {
   });
   const [openDialog, setOpenDialog] = useState(false);
   const [dailyNoteDialog, setDailyNoteDialog] = useState(false);
-  const [newChallenge, setNewChallenge] = useState({ name: '', duration: '' });
+  const [newChallenge, setNewChallenge] = useState<{
+    name: string;
+    duration: string;
+    cadence: ChallengeCadence;
+  }>({ name: '', duration: '', cadence: 'daily' });
   const [note, setNote] = useState('');
   const [dailyNote, setDailyNote] = useState('');
   const [challengeIdForNote, setChallengeIdForNote] = useState<string | null>(null);
@@ -478,6 +508,11 @@ const DashboardPage: React.FC = () => {
   const archivedChallenges = useMemo(
     () => userData.challenges.filter((c) => isChallengePastCalendarDuration(c)),
     [userData.challenges, lastKnownDate]
+  );
+
+  const durationEditChallenge = useMemo(
+    () => userData.challenges.find((c) => c.id === selectedChallengeId) ?? null,
+    [userData.challenges, selectedChallengeId]
   );
   const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -556,6 +591,14 @@ const DashboardPage: React.FC = () => {
     loadUserData();
   }, [currentUser, navigate]);
 
+  // Best-effort: store timezone + push token for reminders (won't block UI).
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    ensureWebPushEnabled(currentUser.uid).catch((e) => {
+      console.warn('Push enablement failed:', e);
+    });
+  }, [currentUser?.uid]);
+
   useEffect(() => {
     if (!hasShownWelcome) {
       sessionStorage.setItem('hasShownWelcome', 'true');
@@ -580,17 +623,10 @@ const DashboardPage: React.FC = () => {
     return date === today;
   };
   const hasMarkedTodayComplete = useCallback((challenge: Challenge): boolean => {
-    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
-    const n = challenge.notes[`${todayDayNumber}`];
-    const content = typeof n?.content === 'string' ? n.content : '';
-    return content.trim().length > 0;
+    return hasCompletedCurrentNoteSlot(challenge);
   }, []);
 
-  // Helper to get the current day for a challenge (capped at challenge duration)
-  const getCurrentDayForChallenge = (challenge: Challenge) => {
-    const dayNumber = getChallengeCalendarDayIndex(challenge);
-    return Math.min(dayNumber, challenge.duration);
-  };
+  const getCurrentDayForChallenge = (challenge: Challenge) => getCurrentSlotDisplayIndex(challenge);
 
 
   // Function to check and show milestone achievements
@@ -662,15 +698,23 @@ const DashboardPage: React.FC = () => {
       return;
     }
 
-    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
+    const slotNumber = getChallengeNoteSlotIndex(challenge);
 
-    if (todayDayNumber < 1 || todayDayNumber > challenge.duration) {
-      alert('You are outside this challenge’s day range. Extend the duration in settings if you need more time.');
+    if (!isWithinChallengeNoteWindow(challenge)) {
+      alert(
+        getChallengeCadence(challenge) === 'weekly'
+          ? 'You are outside this challenge’s week range. Extend the duration in settings if you need more time.'
+          : 'You are outside this challenge’s day range. Extend the duration in settings if you need more time.'
+      );
       return;
     }
 
     if (hasMarkedTodayComplete(challenge)) {
-      alert("You've already marked today's challenge as complete. Come back tomorrow!");
+      alert(
+        getChallengeCadence(challenge) === 'weekly'
+          ? "You've already logged this week. Come back next week!"
+          : "You've already marked today's challenge as complete. Come back tomorrow!"
+      );
       return;
     }
 
@@ -681,7 +725,7 @@ const DashboardPage: React.FC = () => {
         content: note,
         metadata: {
           challengeId,
-          dayNumber: todayDayNumber,
+          dayNumber: slotNumber,
           challengeName: challenge.name,
           completionDate: new Date().toISOString(),
         }
@@ -693,7 +737,7 @@ const DashboardPage: React.FC = () => {
           ...chItem,
           notes: {
             ...(chItem.notes as Record<string, Note>),
-            [`${todayDayNumber}`]: {
+            [`${slotNumber}`]: {
               content: note.trim(),
               ...(vectorId ? { vectorId } : {}),
             },
@@ -924,24 +968,35 @@ const DashboardPage: React.FC = () => {
 
   const handleUpdateDuration = async () => {
     if (!currentUser || !selectedChallengeId || !newDuration) return;
-    
-    const updatedDuration = parseInt(newDuration);
 
-    if (updatedDuration < 10) {
-      alert("Challenge duration must be at least 10 days");
-      return;
-    }
-
-    if (updatedDuration > 365) {
-      alert("Challenge duration cannot be more than 365 days");
-      return;
-    }
-
+    const updatedDuration = parseInt(newDuration, 10);
     const selectedChallenge = userData.challenges.find(c => c.id === selectedChallengeId);
     if (!selectedChallenge) return;
 
+    const cadence = getChallengeCadence(selectedChallenge);
+    const minDur = cadence === 'weekly' ? WEEKLY_DURATION_MIN : DAILY_DURATION_MIN;
+    const maxDur = cadence === 'weekly' ? WEEKLY_DURATION_MAX : DAILY_DURATION_MAX;
+
+    if (updatedDuration < minDur) {
+      alert(
+        cadence === 'weekly'
+          ? `Duration must be at least ${WEEKLY_DURATION_MIN} weeks`
+          : `Challenge duration must be at least ${DAILY_DURATION_MIN} days`
+      );
+      return;
+    }
+
+    if (updatedDuration > maxDur) {
+      alert(
+        cadence === 'weekly'
+          ? `Weekly duration cannot exceed ${WEEKLY_DURATION_MAX} weeks`
+          : `Challenge duration cannot be more than ${DAILY_DURATION_MAX} days`
+      );
+      return;
+    }
+
     if (updatedDuration < selectedChallenge.completedDays) {
-      alert("New duration cannot be less than completed days");
+      alert('New duration cannot be less than the number of periods you have already logged');
       return;
     }
 
@@ -1037,15 +1092,23 @@ const DashboardPage: React.FC = () => {
       return;
     }
 
-    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
+    const slotNumber = getChallengeNoteSlotIndex(challenge);
 
-    if (todayDayNumber < 1 || todayDayNumber > challenge.duration) {
-      alert('You are outside this challenge’s day range. Extend the duration if you need more time.');
+    if (!isWithinChallengeNoteWindow(challenge)) {
+      alert(
+        getChallengeCadence(challenge) === 'weekly'
+          ? 'You are outside this challenge’s week range. Extend the duration if you need more time.'
+          : 'You are outside this challenge’s day range. Extend the duration if you need more time.'
+      );
       return;
     }
 
     if (hasMarkedTodayComplete(challenge)) {
-      alert("You've already marked today's challenge as complete.");
+      alert(
+        getChallengeCadence(challenge) === 'weekly'
+          ? "You've already logged this week."
+          : "You've already marked today's challenge as complete."
+      );
       return;
     }
 
@@ -1056,7 +1119,7 @@ const DashboardPage: React.FC = () => {
         content: note,
         metadata: {
           challengeId: selectedChallengeForNote.id,
-          dayNumber: todayDayNumber,
+          dayNumber: slotNumber,
           challengeName: selectedChallengeForNote.name,
           completionDate: new Date().toISOString(),
         }
@@ -1068,7 +1131,7 @@ const DashboardPage: React.FC = () => {
           ...c,
           notes: {
             ...(c.notes as Record<string, Note>),
-            [`${todayDayNumber}`]: {
+            [`${slotNumber}`]: {
               content: note.trim(),
               ...(vectorId ? { vectorId } : {}),
             },
@@ -1104,17 +1167,19 @@ const DashboardPage: React.FC = () => {
   const handleOpenEditTodayNoteDialog = (challenge: Challenge) => {
     // Only proceed if we have completed the challenge for today
     if (!hasMarkedTodayComplete(challenge)) {
-      alert("You haven't marked today's challenge as complete yet");
+      alert(
+        getChallengeCadence(challenge) === 'weekly'
+          ? "You haven't logged this week's check-in yet"
+          : "You haven't marked today's challenge as complete yet"
+      );
       return;
     }
     
     setEditTodayChallengeId(challenge.id);
     
-    // Get today's day number for this challenge
-    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
-    
-    // Get the existing note for today
-    const existingNote = challenge.notes[`${todayDayNumber}`]?.content || '';
+    const slotNumber = getChallengeNoteSlotIndex(challenge);
+
+    const existingNote = challenge.notes[`${slotNumber}`]?.content || '';
     setEditTodayNote(existingNote);
     
     setEditTodayNoteDialogOpen(true);
@@ -1127,10 +1192,10 @@ const DashboardPage: React.FC = () => {
     const challenge = userData.challenges.find(c => c.id === editTodayChallengeId);
     if (!challenge) return;
     
-    const todayDayNumber = getChallengeCalendarDayIndex(challenge);
+    const slotNumber = getChallengeNoteSlotIndex(challenge);
 
     const prevVectorId =
-      challenge.notes[`${todayDayNumber}`]?.vectorId ?? '';
+      challenge.notes[`${slotNumber}`]?.vectorId ?? '';
 
     const updatedChallenges = userData.challenges.map(c => {
       if (c.id === editTodayChallengeId) {
@@ -1138,7 +1203,7 @@ const DashboardPage: React.FC = () => {
           ...c,
           notes: {
             ...(c.notes as Record<string, Note>),
-            [`${todayDayNumber}`]: {
+            [`${slotNumber}`]: {
               content: editTodayNote.trim(),
               vectorId: prevVectorId,
             },
@@ -1156,13 +1221,13 @@ const DashboardPage: React.FC = () => {
       await updatePineconeNote({
         userId: currentUser.uid,
         type: 'note',
-        id: `${editTodayChallengeId}_day${todayDayNumber}`,
+        id: `${editTodayChallengeId}_day${slotNumber}`,
         content: editTodayNote,
         oldVectorId: prevVectorId || undefined,
         metadata: {
           challengeId: editTodayChallengeId,
           challengeName: challenge.name,
-          dayNumber: todayDayNumber,
+          dayNumber: slotNumber,
           updateDate: new Date().toISOString(),
         }
       });
@@ -1234,15 +1299,32 @@ const DashboardPage: React.FC = () => {
       return;
     }
 
-    if (parseInt(newChallenge.duration) > 365) {
-      alert("Challenge duration cannot be more than 365 days");
-      return;
+    const dur = parseInt(newChallenge.duration, 10);
+    if (newChallenge.cadence === 'daily') {
+      if (dur > DAILY_DURATION_MAX) {
+        alert(`Challenge duration cannot be more than ${DAILY_DURATION_MAX} days`);
+        return;
+      }
+      if (dur < DAILY_DURATION_MIN) {
+        alert(`Daily challenges need at least ${DAILY_DURATION_MIN} days`);
+        return;
+      }
+    } else {
+      if (dur > WEEKLY_DURATION_MAX) {
+        alert(`Weekly challenges cannot exceed ${WEEKLY_DURATION_MAX} weeks`);
+        return;
+      }
+      if (dur < WEEKLY_DURATION_MIN) {
+        alert(`Weekly challenges need at least ${WEEKLY_DURATION_MIN} weeks`);
+        return;
+      }
     }
 
     const challenge: Challenge = {
       id: Date.now().toString(),
       name: newChallenge.name,
-      duration: parseInt(newChallenge.duration),
+      duration: dur,
+      cadence: newChallenge.cadence,
       startDate: new Date().toISOString(),
       completedDays: 0,
       notes: {}
@@ -1265,7 +1347,7 @@ const DashboardPage: React.FC = () => {
     }
 
     setOpenDialog(false);
-    setNewChallenge({ name: '', duration: '' });
+    setNewChallenge({ name: '', duration: '', cadence: 'daily' });
   };
 
   const handleNoteChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, challengeId: string) => {
@@ -1584,7 +1666,7 @@ const DashboardPage: React.FC = () => {
                   }}>
                     <CardContent sx={{ flexGrow: 1 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
                           <Avatar 
                             sx={{ 
                               width: 32, 
@@ -1601,6 +1683,13 @@ const DashboardPage: React.FC = () => {
                           >
                             {challenge.name}
                           </Typography>
+                          <Chip
+                            label={formatCadenceLabel(getChallengeCadence(challenge))}
+                            size="small"
+                            variant="outlined"
+                            color={getChallengeCadence(challenge) === 'weekly' ? 'secondary' : 'default'}
+                            sx={{ height: 22, fontWeight: 600 }}
+                          />
                         </Box>
                         <Box>
                           {hasMarkedTodayComplete(challenge) ? (
@@ -1668,9 +1757,15 @@ const DashboardPage: React.FC = () => {
                         
                         <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
                             <Chip
-                              label={hasMarkedTodayComplete(challenge)
-                                ? `Day ${getCurrentDayForChallenge(challenge)} of ${challenge.duration} ✅`
-                                : `Day ${getCurrentDayForChallenge(challenge)} of ${challenge.duration}`}
+                              label={
+                                getChallengeCadence(challenge) === 'weekly'
+                                  ? hasMarkedTodayComplete(challenge)
+                                    ? `Week ${getCurrentDayForChallenge(challenge)} of ${challenge.duration} ✅`
+                                    : `Week ${getCurrentDayForChallenge(challenge)} of ${challenge.duration}`
+                                  : hasMarkedTodayComplete(challenge)
+                                    ? `Day ${getCurrentDayForChallenge(challenge)} of ${challenge.duration} ✅`
+                                    : `Day ${getCurrentDayForChallenge(challenge)} of ${challenge.duration}`
+                              }
                               size="small"
                               color={hasMarkedTodayComplete(challenge) ? 'success' : 'primary'}
                               variant={hasMarkedTodayComplete(challenge) ? 'filled' : 'outlined'}
@@ -1679,11 +1774,12 @@ const DashboardPage: React.FC = () => {
                           
                           {(() => {
                             const streak = getLoggedStreakForChallenge(challenge);
+                            const unit = getChallengeCadence(challenge) === 'weekly' ? 'week' : 'day';
                             return (
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, mb: 1 }}>
                                 <LocalFireDepartmentIcon sx={{ color: streak > 0 ? 'orange' : 'grey.400', fontSize: 20 }} />
                                 <Typography variant="body2" fontWeight={600} color={streak > 0 ? 'orange' : 'text.secondary'}>
-                                  {streak > 0 ? `${streak}-day streak` : 'No streak'}
+                                  {streak > 0 ? `${streak}-${unit} streak` : 'No streak'}
                                 </Typography>
                               </Box>
                             );
@@ -1728,7 +1824,11 @@ const DashboardPage: React.FC = () => {
                             }
                           }}
                         >
-                          <b>ONE DAY AT A TIME! ✅</b>
+                          <b>
+                            {getChallengeCadence(challenge) === 'weekly'
+                              ? 'ONE WEEK AT A TIME! ✅'
+                              : 'ONE DAY AT A TIME! ✅'}
+                          </b>
                         </Alert>
                       )}
                     </CardContent>
@@ -1737,15 +1837,15 @@ const DashboardPage: React.FC = () => {
                         <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                           <Box sx={{ mr: 1, flex: 1 }}>
                             <Typography variant="body2" color="text.secondary" noWrap sx={{ fontStyle: 'italic' }}>
-                              {challenge.notes[`${getChallengeCalendarDayIndex(challenge)}`]?.content
-                                ? challenge.notes[`${getChallengeCalendarDayIndex(challenge)}`]?.content.length > 30
-                                  ? challenge.notes[`${getChallengeCalendarDayIndex(challenge)}`]?.content.substring(0, 30) + '...'
-                                  : challenge.notes[`${getChallengeCalendarDayIndex(challenge)}`]?.content
+                              {challenge.notes[`${getChallengeNoteSlotIndex(challenge)}`]?.content
+                                ? challenge.notes[`${getChallengeNoteSlotIndex(challenge)}`]?.content.length > 30
+                                  ? challenge.notes[`${getChallengeNoteSlotIndex(challenge)}`]?.content.substring(0, 30) + '...'
+                                  : challenge.notes[`${getChallengeNoteSlotIndex(challenge)}`]?.content
                                 : 'Note not added'
                               }
                             </Typography>
                           </Box>
-                          <Tooltip title="Edit today's note">
+                          <Tooltip title={getChallengeCadence(challenge) === 'weekly' ? 'Edit this week’s note' : "Edit today's note"}>
                             <IconButton 
                               size="small" 
                               color="primary"
@@ -1800,8 +1900,8 @@ const DashboardPage: React.FC = () => {
                             disabled={
                               challengeIdForNote !== challenge.id ||
                               !note.trim() ||
-                              getChallengeCalendarDayIndex(challenge) < 1 ||
-                              getChallengeCalendarDayIndex(challenge) > challenge.duration
+                              !isWithinChallengeNoteWindow(challenge) ||
+                              hasMarkedTodayComplete(challenge)
                             }
                             sx={{ 
                               whiteSpace: 'nowrap',
@@ -1822,7 +1922,7 @@ const DashboardPage: React.FC = () => {
             {activeChallenges.length === 0 && userData.challenges.length > 0 && (
               <Grid item xs={12}>
                 <Alert severity="info" sx={{ borderRadius: 2 }}>
-                  No challenge is currently within days 1 through its duration (today is past the last day for each one).{' '}
+                  No challenge is currently in an active logging window (today is past the last day or week for each one).{' '}
                   Open <Box component="span" sx={{ fontWeight: 700 }}>Archives</Box>, or start a new challenge from the + menu.
                 </Alert>
               </Grid>
@@ -1895,8 +1995,20 @@ const DashboardPage: React.FC = () => {
                             <Typography variant="h6" fontWeight={700} sx={{ color: 'text.primary', fontSize: '1.15rem' }}>
                               {challenge.name}
                             </Typography>
+                            <Chip
+                              label={formatCadenceLabel(getChallengeCadence(challenge))}
+                              size="small"
+                              variant="outlined"
+                              color={getChallengeCadence(challenge) === 'weekly' ? 'secondary' : 'default'}
+                              sx={{ height: 22, fontWeight: 600 }}
+                            />
                             {fullyFilled ? (
-                              <Chip label="All days logged" size="small" color="success" sx={{ height: 22 }} />
+                              <Chip
+                                label={getChallengeCadence(challenge) === 'weekly' ? 'All weeks logged' : 'All days logged'}
+                                size="small"
+                                color="success"
+                                sx={{ height: 22 }}
+                              />
                             ) : pastWindow ? (
                               <Chip label="Window ended" size="small" color="warning" variant="outlined" sx={{ height: 22 }} />
                             ) : (
@@ -1904,10 +2016,15 @@ const DashboardPage: React.FC = () => {
                             )}
                           </Stack>
                           <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                            Days completed: <b>{challenge.completedDays}</b> / {challenge.duration}
+                            {getChallengeCadence(challenge) === 'weekly' ? 'Weeks logged' : 'Days completed'}:{' '}
+                            <b>{challenge.completedDays}</b> / {challenge.duration}
                           </Typography>
                           <Chip
-                            label={streak > 0 ? `Streak: ${streak} day${streak > 1 ? 's' : ''}` : 'No streak'}
+                            label={
+                              streak > 0
+                                ? `Streak: ${streak} ${getChallengeCadence(challenge) === 'weekly' ? 'week' : 'day'}${streak > 1 ? 's' : ''}`
+                                : 'No streak'
+                            }
                             color={streak > 0 ? 'warning' : 'default'}
                             size="small"
                             icon={<LocalFireDepartmentIcon sx={{ color: streak > 0 ? 'orange' : 'grey.400' }} />}
@@ -1950,7 +2067,7 @@ const DashboardPage: React.FC = () => {
                 }}
               >
                 <Typography color="text.secondary">
-                  Nothing here yet. A 10‑day challenge appears after calendar day 11 (even if you only logged some days)—while you&apos;re still on days 1–10 it stays under Active Challenges.
+                  Nothing here yet. A challenge moves here after the last day of its window (for weekly challenges, after the last day of the final week). While you are still inside that window it stays under Active Challenges.
                 </Typography>
               </Paper>
             ) : (
@@ -1997,18 +2114,34 @@ const DashboardPage: React.FC = () => {
                               <Typography variant="h6" fontWeight={700} sx={{ color: 'text.primary', fontSize: '1.15rem' }}>
                                 {challenge.name}
                               </Typography>
+                              <Chip
+                                label={formatCadenceLabel(getChallengeCadence(challenge))}
+                                size="small"
+                                variant="outlined"
+                                color={getChallengeCadence(challenge) === 'weekly' ? 'secondary' : 'default'}
+                                sx={{ height: 22, fontWeight: 600 }}
+                              />
                               {fullyFilled ? (
-                                <Chip label="All days logged" size="small" color="success" sx={{ height: 22 }} />
+                                <Chip
+                                  label={getChallengeCadence(challenge) === 'weekly' ? 'All weeks logged' : 'All days logged'}
+                                  size="small"
+                                  color="success"
+                                  sx={{ height: 22 }}
+                                />
                               ) : (
                                 <Chip label="Window ended" size="small" color="warning" variant="outlined" sx={{ height: 22 }} />
                               )}
                             </Stack>
                             <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                              Days completed:{' '}
+                              {getChallengeCadence(challenge) === 'weekly' ? 'Weeks logged' : 'Days completed'}:{' '}
                               <b>{challenge.completedDays}</b> / {challenge.duration}
                             </Typography>
                             <Chip
-                              label={streak > 0 ? `Streak: ${streak} day${streak > 1 ? 's' : ''}` : 'No streak'}
+                              label={
+                                streak > 0
+                                  ? `Streak: ${streak} ${getChallengeCadence(challenge) === 'weekly' ? 'week' : 'day'}${streak > 1 ? 's' : ''}`
+                                  : 'No streak'
+                              }
                               color={streak > 0 ? 'warning' : 'default'}
                               size="small"
                               icon={<LocalFireDepartmentIcon sx={{ color: streak > 0 ? 'orange' : 'grey.400' }} />}
@@ -2040,26 +2173,48 @@ const DashboardPage: React.FC = () => {
           PaperProps={{ sx: { borderRadius: 3 } }}
         >
           <DialogTitle>
-            <Typography variant="h6" fontWeight={700}>{previewChallenge?.name}</Typography>
+            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+              <Typography variant="h6" fontWeight={700}>{previewChallenge?.name}</Typography>
+              {previewChallenge ? (
+                <Chip
+                  label={formatCadenceLabel(getChallengeCadence(previewChallenge))}
+                  size="small"
+                  variant="outlined"
+                  color={getChallengeCadence(previewChallenge) === 'weekly' ? 'secondary' : 'default'}
+                  sx={{ height: 24, fontWeight: 600 }}
+                />
+              ) : null}
+            </Stack>
           </DialogTitle>
           <DialogContent>
             {previewChallenge && (
               <Box sx={{ mt: 2 }}>
                 <Grid container spacing={1}>
                   {Array.from({ length: previewChallenge.duration }).map((_, i) => {
-                    const dayNum = i + 1;
-                    const startDate = new Date(previewChallenge.startDate);
-                    const cellDate = new Date(startDate.getTime());
-                    cellDate.setDate(startDate.getDate() + i);
+                    const slotNum = i + 1;
+                    const isWeekly = getChallengeCadence(previewChallenge) === 'weekly';
+                    const cellLabel = isWeekly
+                      ? `${getWeeklySlotLocalDateRange(previewChallenge, slotNum).start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${getWeeklySlotLocalDateRange(previewChallenge, slotNum).end.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
+                      : (() => {
+                          const startDate = new Date(previewChallenge.startDate);
+                          const cellDate = new Date(startDate.getTime());
+                          cellDate.setDate(startDate.getDate() + i);
+                          return cellDate.toLocaleDateString();
+                        })();
                     const isLogged = Boolean(
-                      previewChallenge.notes[`${dayNum}`]?.content?.trim()
+                      previewChallenge.notes[`${slotNum}`]?.content?.trim()
                     );
-                    const note = previewChallenge.notes[`${dayNum}`];
+                    const note = previewChallenge.notes[`${slotNum}`];
                     const tooltipContent = note
-                      ? (<Box sx={{p:1}}><Typography variant="caption" fontWeight={600}>{cellDate.toLocaleDateString()}</Typography><Typography variant="body2" sx={{whiteSpace:'pre-wrap'}}>{note.content}</Typography></Box>)
-                      : cellDate.toLocaleDateString();
+                      ? (
+                          <Box sx={{ p: 1 }}>
+                            <Typography variant="caption" fontWeight={600}>{cellLabel}</Typography>
+                            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{note.content}</Typography>
+                          </Box>
+                        )
+                      : cellLabel;
                     return (
-                      <Grid item xs={2} sm={1} key={dayNum}>
+                      <Grid item xs={2} sm={1} key={slotNum}>
                         {isMobile ? (
                           <Box
                             sx={{
@@ -2072,7 +2227,7 @@ const DashboardPage: React.FC = () => {
                               alignItems: 'center',
                               justifyContent: 'center',
                               fontWeight: 700,
-                              fontSize: '1.05rem',
+                              fontSize: isWeekly ? '0.7rem' : '1.05rem',
                               cursor: 'pointer',
                               border: isLogged ? '2.5px solid #2ec4b6' : '1.5px solid #e0e0e0',
                               boxShadow: isLogged ? '0 2px 8px 0 rgba(46,196,182,0.10)' : 'none',
@@ -2081,9 +2236,9 @@ const DashboardPage: React.FC = () => {
                                 boxShadow: '0 0 0 2px #2ec4b6',
                               },
                             }}
-                            onClick={() => { setCellDialogContent({date: cellDate.toLocaleDateString(), note: note?.content || ''}); setCellDialogOpen(true); }}
+                            onClick={() => { setCellDialogContent({ date: cellLabel, note: note?.content || '' }); setCellDialogOpen(true); }}
                           >
-                            {dayNum}
+                            {isWeekly ? `W${slotNum}` : slotNum}
                           </Box>
                         ) : (
                           <Tooltip title={tooltipContent} arrow>
@@ -2098,7 +2253,7 @@ const DashboardPage: React.FC = () => {
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 fontWeight: 700,
-                                fontSize: '1.05rem',
+                                fontSize: isWeekly ? '0.7rem' : '1.05rem',
                                 cursor: 'pointer',
                                 border: isLogged ? '2.5px solid #2ec4b6' : '1.5px solid #e0e0e0',
                                 boxShadow: isLogged ? '0 2px 8px 0 rgba(46,196,182,0.10)' : 'none',
@@ -2109,7 +2264,7 @@ const DashboardPage: React.FC = () => {
                                 },
                               }}
                             >
-                              {dayNum}
+                              {isWeekly ? `W${slotNum}` : slotNum}
                             </Box>
                           </Tooltip>
                         )}
@@ -2119,9 +2274,11 @@ const DashboardPage: React.FC = () => {
                 </Grid>
                 <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 3, mb: 1 }}>
                   <Box sx={{ width: 24, height: 24, bgcolor: 'primary.main', borderRadius: 1, border: '2px solid #2ec4b6', mr: 1 }} />
-                  <Typography variant="body2" color="text.secondary">Logged Day</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {getChallengeCadence(previewChallenge) === 'weekly' ? 'Logged week' : 'Logged day'}
+                  </Typography>
                   <Box sx={{ width: 24, height: 24, bgcolor: 'background.paper', borderRadius: 1, border: '1.5px solid #e0e0e0', ml: 3, mr: 1 }} />
-                  <Typography variant="body2" color="text.secondary">Not Logged</Typography>
+                  <Typography variant="body2" color="text.secondary">Not logged</Typography>
                 </Stack>
               </Box>
             )}
@@ -2324,7 +2481,10 @@ const DashboardPage: React.FC = () => {
         {/* Add Challenge Dialog */}
         <Dialog 
           open={openDialog} 
-          onClose={() => setOpenDialog(false)}
+          onClose={() => {
+            setOpenDialog(false);
+            setNewChallenge({ name: '', duration: '', cadence: 'daily' });
+          }}
           PaperProps={{
             sx: { borderRadius: 3, maxWidth: '500px', width: '100%' }
           }}
@@ -2339,7 +2499,7 @@ const DashboardPage: React.FC = () => {
           </DialogTitle>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Define a new challenge to build your resilience muscles.
+              Define a new challenge to build your resilience muscles. Weekly challenges use one check-in per rolling 7-day block from your start date.
             </Typography>
             <TextField
               id="add-challenge-name"
@@ -2353,25 +2513,65 @@ const DashboardPage: React.FC = () => {
               inputProps={{ maxLength: 30 }}
               helperText={`${newChallenge.name.length}/30 characters`}
             />
+            <FormControl sx={{ mb: 2 }}>
+              <FormLabel id="add-challenge-cadence-label">Check-in frequency</FormLabel>
+              <RadioGroup
+                row
+                aria-labelledby="add-challenge-cadence-label"
+                value={newChallenge.cadence}
+                onChange={(e) =>
+                  setNewChallenge({
+                    ...newChallenge,
+                    cadence: e.target.value as ChallengeCadence,
+                    duration: '',
+                  })
+                }
+              >
+                <FormControlLabel value="daily" control={<Radio size="small" />} label="Daily" />
+                <FormControlLabel value="weekly" control={<Radio size="small" />} label="Weekly" />
+              </RadioGroup>
+            </FormControl>
             <TextField
               id="add-challenge-duration"
               name="challengeDuration"
               margin="dense"
-              label="Duration (days)"
+              label={getChallengeDurationFieldLabel(newChallenge.cadence)}
               type="number"
               fullWidth
               value={newChallenge.duration}
               onChange={(e) => setNewChallenge({ ...newChallenge, duration: e.target.value })}
-              inputProps={{ min: 10, max: 365 }}
-              helperText="Challenge duration must be between 10 and 365 days"
+              inputProps={
+                newChallenge.cadence === 'weekly'
+                  ? { min: WEEKLY_DURATION_MIN, max: WEEKLY_DURATION_MAX }
+                  : { min: DAILY_DURATION_MIN, max: DAILY_DURATION_MAX }
+              }
+              helperText={
+                newChallenge.cadence === 'weekly'
+                  ? `Between ${WEEKLY_DURATION_MIN} and ${WEEKLY_DURATION_MAX} weeks (${WEEKLY_DURATION_MIN * 7}–${WEEKLY_DURATION_MAX * 7} days total)`
+                  : `Between ${DAILY_DURATION_MIN} and ${DAILY_DURATION_MAX} days`
+              }
             />
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 3 }}>
-            <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                setOpenDialog(false);
+                setNewChallenge({ name: '', duration: '', cadence: 'daily' });
+              }}
+            >
+              Cancel
+            </Button>
             <Button 
               onClick={handleAddChallenge} 
               variant="contained" 
-              disabled={!newChallenge.name || !newChallenge.duration || parseInt(newChallenge.duration) < 10 || parseInt(newChallenge.duration) > 365}
+              disabled={(() => {
+                const n = parseInt(newChallenge.duration, 10);
+                if (!newChallenge.name.trim() || !newChallenge.duration || Number.isNaN(n)) return true;
+                if (newChallenge.cadence === 'daily') {
+                  return n < DAILY_DURATION_MIN || n > DAILY_DURATION_MAX;
+                }
+                return n < WEEKLY_DURATION_MIN || n > WEEKLY_DURATION_MAX;
+              })()}
             >
               Add Challenge
             </Button>
@@ -2489,7 +2689,9 @@ const DashboardPage: React.FC = () => {
           </DialogTitle>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Set a new duration for your challenge. The duration must be at least 10 days and cannot be more than 365 days.
+              {durationEditChallenge && getChallengeCadence(durationEditChallenge) === 'weekly'
+                ? `Set how many week-long check-in periods this challenge should run (${WEEKLY_DURATION_MIN}–${WEEKLY_DURATION_MAX} weeks).`
+                : `Set how many calendar days this challenge should run (${DAILY_DURATION_MIN}–${DAILY_DURATION_MAX} days).`}
             </Typography>
             <TextField
               id="update-challenge-duration"
@@ -2497,11 +2699,23 @@ const DashboardPage: React.FC = () => {
               autoFocus
               fullWidth
               type="number"
-              label="New Duration (days)"
+              label={
+                durationEditChallenge
+                  ? getChallengeDurationFieldLabel(getChallengeCadence(durationEditChallenge))
+                  : 'New duration'
+              }
               value={newDuration}
               onChange={(e) => setNewDuration(e.target.value)}
-              inputProps={{ min: 10, max: 365 }}
-              helperText="Duration must be between 10 and 365 days"
+              inputProps={
+                durationEditChallenge && getChallengeCadence(durationEditChallenge) === 'weekly'
+                  ? { min: WEEKLY_DURATION_MIN, max: WEEKLY_DURATION_MAX }
+                  : { min: DAILY_DURATION_MIN, max: DAILY_DURATION_MAX }
+              }
+              helperText={
+                durationEditChallenge && getChallengeCadence(durationEditChallenge) === 'weekly'
+                  ? `Between ${WEEKLY_DURATION_MIN} and ${WEEKLY_DURATION_MAX} weeks`
+                  : `Between ${DAILY_DURATION_MIN} and ${DAILY_DURATION_MAX} days`
+              }
               sx={{ mt: 1 }}
             />
           </DialogContent>
@@ -2510,7 +2724,14 @@ const DashboardPage: React.FC = () => {
             <Button 
               onClick={handleUpdateDuration}
               variant="contained"
-              disabled={!newDuration || parseInt(newDuration) < 10 || parseInt(newDuration) > 365}
+              disabled={(() => {
+                const n = parseInt(newDuration, 10);
+                if (!newDuration || Number.isNaN(n) || !durationEditChallenge) return true;
+                if (getChallengeCadence(durationEditChallenge) === 'weekly') {
+                  return n < WEEKLY_DURATION_MIN || n > WEEKLY_DURATION_MAX;
+                }
+                return n < DAILY_DURATION_MIN || n > DAILY_DURATION_MAX;
+              })()}
             >
               Update Duration
             </Button>
@@ -2636,9 +2857,9 @@ const DashboardPage: React.FC = () => {
                 (() => {
                   const c = userData.challenges.find(x => x.id === selectedChallengeForNote!.id);
                   if (!c) return true;
-                  const d = getChallengeCalendarDayIndex(c);
-                  if (d < 1 || d > c.duration) return true;
-                  const prev = (c.notes[`${d}`]?.content ?? '').trim();
+                  if (!isWithinChallengeNoteWindow(c)) return true;
+                  const slot = getChallengeNoteSlotIndex(c);
+                  const prev = (c.notes[`${slot}`]?.content ?? '').trim();
                   return note.trim() === prev;
                 })()
               }
@@ -2663,7 +2884,7 @@ const DashboardPage: React.FC = () => {
               </Avatar>
               <Box>
                 <Typography variant="h6" fontWeight={600} component="span">
-                  Edit Today&apos;s Note for <i>{userData.challenges.find(c => c.id === editTodayChallengeId)?.name}</i> Challenge
+                  Edit note for <i>{userData.challenges.find(c => c.id === editTodayChallengeId)?.name}</i>
                 </Typography>
               </Box>
             </Stack>
@@ -2702,8 +2923,8 @@ const DashboardPage: React.FC = () => {
                 (() => {
                   const c = userData.challenges.find(x => x.id === editTodayChallengeId);
                   if (!c || !editTodayChallengeId) return false;
-                  const d = getChallengeCalendarDayIndex(c);
-                  const prev = (c.notes[`${d}`]?.content ?? '').trim();
+                  const slot = getChallengeNoteSlotIndex(c);
+                  const prev = (c.notes[`${slot}`]?.content ?? '').trim();
                   return prev === editTodayNote.trim();
                 })()
               }

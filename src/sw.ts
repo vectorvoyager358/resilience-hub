@@ -1,0 +1,93 @@
+/// <reference lib="webworker" />
+
+import { clientsClaim } from 'workbox-core';
+import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+import { registerRoute } from 'workbox-routing';
+import { NetworkFirst } from 'workbox-strategies';
+
+import { initializeApp } from 'firebase/app';
+import { getMessaging, onBackgroundMessage } from 'firebase/messaging/sw';
+
+declare const self: ServiceWorkerGlobalScope & {
+  __WB_MANIFEST: Array<{
+    url: string;
+    revision: string | null;
+  }>;
+};
+
+clientsClaim();
+cleanupOutdatedCaches();
+
+// Precache Vite build assets.
+precacheAndRoute(self.__WB_MANIFEST);
+
+// Make SPA navigations resilient on GitHub Pages / Cloud Run.
+registerRoute(
+  ({ request }) => request.mode === 'navigate',
+  new NetworkFirst({
+    cacheName: 'pages',
+  })
+);
+
+// ---- FCM background notifications ----
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+try {
+  const app = initializeApp(firebaseConfig);
+  const messaging = getMessaging(app);
+
+  onBackgroundMessage(messaging, (payload) => {
+    const title =
+      payload.notification?.title ??
+      payload.data?.title ??
+      'Resilience Hub reminder';
+
+    const body =
+      payload.notification?.body ??
+      payload.data?.body ??
+      'You have pending challenges to log today.';
+
+    const url = payload.data?.url ?? '/dashboard';
+
+    self.registration.showNotification(title, {
+      body,
+      data: { url },
+    });
+  });
+} catch (e) {
+  // If messaging config is incomplete, the app should still function.
+  // Background push just won't be available.
+  console.warn('Service worker FCM init failed:', e);
+}
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data as { url?: string } | undefined)?.url ?? '/dashboard';
+
+  event.waitUntil(
+    (async () => {
+      const allClients = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+
+      for (const client of allClients) {
+        if ('focus' in client) {
+          await (client as WindowClient).focus();
+          (client as WindowClient).navigate(url);
+          return;
+        }
+      }
+
+      await self.clients.openWindow(url);
+    })()
+  );
+});
+

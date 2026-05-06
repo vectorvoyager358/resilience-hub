@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Container,
   Paper,
@@ -14,10 +14,12 @@ import {
   DialogActions,
   CircularProgress,
   Stack,
-  Divider,
   InputAdornment,
-  IconButton
+  IconButton,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
+import { alpha, type Theme } from '@mui/material/styles';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import LockIcon from '@mui/icons-material/Lock';
 import EmailIcon from '@mui/icons-material/Email';
@@ -25,15 +27,27 @@ import EditIcon from '@mui/icons-material/Edit';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import { EmailAuthProvider, reauthenticateWithCredential, updateProfile } from 'firebase/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { updateUserData, getUserData } from '../services/firestore';
 import { upsertChallengeData } from '../services/pinecone';
 import { useNavigate } from 'react-router-dom';
+import { ensureWebPushEnabled } from '../services/push';
 
 const ProfilePage: React.FC = () => {
   const { currentUser, updatePassword } = useAuth();
   const navigate = useNavigate();
+
+  const profileInitials = useMemo(() => {
+    const name = currentUser?.displayName?.trim();
+    if (!name) return '?';
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+    }
+    return name.slice(0, 2).toUpperCase();
+  }, [currentUser?.displayName]);
   const [openPasswordDialog, setOpenPasswordDialog] = useState(false);
   const [openNameDialog, setOpenNameDialog] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
@@ -54,6 +68,30 @@ const ProfilePage: React.FC = () => {
     special: true
   });
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
+  const [pushRemindersEnabled, setPushRemindersEnabled] = useState(true);
+  const [pushLoading, setPushLoading] = useState(false);
+
+  useEffect(() => {
+    const uid = currentUser?.uid;
+    if (!uid) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = await getUserData(uid);
+        if (cancelled) return;
+        if (data && typeof data.pushRemindersEnabled === 'boolean') {
+          setPushRemindersEnabled(data.pushRemindersEnabled);
+        }
+      } catch {
+        // best-effort
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.uid]);
 
   // Password validation function
   const validatePassword = (password: string) => {
@@ -170,158 +208,298 @@ const ProfilePage: React.FC = () => {
     }
   };
 
+  const fieldShellSx = {
+    p: { xs: 2, sm: 2.5 },
+    borderRadius: 3,
+    border: '1px solid',
+    borderColor: (t: Theme) => alpha(t.palette.primary.main, 0.12),
+    bgcolor: (t: Theme) => alpha(t.palette.primary.main, 0.04),
+    transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+    '&:hover': {
+      borderColor: (t: Theme) => alpha(t.palette.primary.main, 0.22),
+      boxShadow: (t: Theme) => `0 12px 40px ${alpha(t.palette.common.black, 0.06)}`,
+    },
+  };
+
+  const iconWrapSx = {
+    width: 44,
+    height: 44,
+    borderRadius: 2,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    bgcolor: (t: Theme) => alpha(t.palette.primary.main, 0.12),
+    color: 'primary.main',
+  };
+
   return (
-    <Container maxWidth="md" sx={{ py: 6, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80vh' }}>
-      <Paper 
-        elevation={6} 
-        sx={{ 
-          p: { xs: 2, sm: 4 }, 
-          borderRadius: 4,
-          maxWidth: 480,
-          width: '100%',
-          mx: 'auto',
-          boxShadow: '0 8px 32px 0 rgba(46,196,182,0.10)',
-          background: 'linear-gradient(135deg, #f8fafc 0%, #e3f6f5 100%)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          position: 'relative',
-        }}
-      >
-        {/* Back Button */}
-        <IconButton
-          onClick={() => navigate('/dashboard')}
+    <Box
+      sx={{
+        minHeight: { xs: 'calc(100vh - 32px)', sm: '85vh' },
+        py: { xs: 3, sm: 5 },
+        px: { xs: 1, sm: 2 },
+        background: (t) =>
+          `radial-gradient(1200px 600px at 50% -10%, ${alpha(t.palette.primary.main, 0.14)}, transparent 55%),
+           radial-gradient(900px 500px at 100% 30%, ${alpha(t.palette.secondary.main, 0.08)}, transparent 50%),
+           linear-gradient(180deg, ${t.palette.grey[50]} 0%, ${alpha(t.palette.primary.main, 0.03)} 100%)`,
+      }}
+    >
+      <Container maxWidth="sm" sx={{ display: 'flex', justifyContent: 'center' }}>
+        <Paper
+          elevation={0}
           sx={{
-            position: 'absolute',
-            top: 18,
-            left: 18,
-            bgcolor: 'white',
-            color: 'primary.main',
-            border: '2px solid',
-            borderColor: 'primary.main',
-            boxShadow: '0 1px 4px 0 rgba(46,196,182,0.10)',
-            transition: 'all 0.2s',
-            '&:hover': {
-              bgcolor: 'primary.main',
-              color: 'white',
-              borderColor: 'primary.main',
-            },
-            zIndex: 2,
+            width: '100%',
+            maxWidth: 440,
+            borderRadius: 4,
+            overflow: 'hidden',
+            position: 'relative',
+            border: '1px solid',
+            borderColor: (t) => alpha(t.palette.divider, 0.6),
+            boxShadow: (t) => `0 24px 64px ${alpha(t.palette.common.black, 0.08)}`,
+            bgcolor: (t) => alpha(t.palette.background.paper, 0.92),
+            backdropFilter: 'blur(12px)',
           }}
-          size="small"
         >
-          <ArrowBackIosNewIcon fontSize="small" />
-        </IconButton>
-        <Box sx={{
-          width: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          mb: 3,
-        }}>
-          <Box sx={{
-            background: 'linear-gradient(135deg, #2ec4b6 0%, #ff9f1c 100%)',
-            borderRadius: '50%',
-            p: 0.5,
-            mb: 1.2,
-            boxShadow: '0 4px 16px 0 rgba(46,196,182,0.10)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <Avatar 
-              sx={{ 
-                width: 64, 
-                height: 64, 
-                bgcolor: 'white',
-                color: '#2ec4b6',
-                border: '3px solid #2ec4b6',
-                fontSize: 36,
-              }}
-            >
-              <AccountCircleIcon sx={{ fontSize: 40 }} />
-            </Avatar>
-          </Box>
-          <Typography variant="h4" component="h1" fontWeight={700} gutterBottom sx={{ color: '#222', mb: 0 }}>
-            Profile
-          </Typography>
-        </Box>
+          <Box
+            sx={{
+              height: 4,
+              width: '100%',
+              background: (t) =>
+                `linear-gradient(90deg, ${t.palette.primary.main} 0%, ${t.palette.secondary.main} 100%)`,
+            }}
+          />
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 3, borderRadius: 2, width: '100%' }}>
-            {error}
-          </Alert>
-        )}
-
-        {success && (
-          <Alert severity="success" sx={{ mb: 3, borderRadius: 2, width: '100%' }}>
-            {success}
-          </Alert>
-        )}
-
-        <Stack spacing={0} sx={{ width: '100%' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2 }}>
-            <AccountCircleIcon color="primary" sx={{ fontSize: 28 }} />
-            <Box sx={{ flexGrow: 1 }}>
-              <Typography variant="subtitle2" color="text.secondary">Name</Typography>
-              <Typography variant="h6" fontWeight={600}>{currentUser?.displayName || '—'}</Typography>
-            </Box>
-            <IconButton 
-              size="small" 
-              onClick={() => setOpenNameDialog(true)}
+          <Box sx={{ px: { xs: 2, sm: 3 }, pt: 2.5, pb: 1 }}>
+            <IconButton
+              onClick={() => navigate('/dashboard')}
+              aria-label="Back to dashboard"
               sx={{
-                bgcolor: 'white',
-                color: 'primary.main',
-                border: '2px solid',
-                borderColor: 'primary.main',
-                boxShadow: '0 1px 4px 0 rgba(46,196,182,0.10)',
-                transition: 'all 0.2s',
+                color: 'text.secondary',
+                bgcolor: (t) => alpha(t.palette.primary.main, 0.06),
                 '&:hover': {
-                  bgcolor: 'primary.main',
-                  color: 'white',
-                  borderColor: 'primary.main',
+                  bgcolor: (t) => alpha(t.palette.primary.main, 0.14),
+                  color: 'primary.main',
                 },
               }}
+              size="small"
             >
-              <EditIcon fontSize="small" />
+              <ArrowBackIosNewIcon sx={{ fontSize: 16, ml: 0.25 }} />
             </IconButton>
           </Box>
-          <Divider />
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2 }}>
-            <EmailIcon color="primary" sx={{ fontSize: 28 }} />
-            <Box sx={{ flexGrow: 1 }}>
-              <Typography variant="subtitle2" color="text.secondary">Email</Typography>
-              <Typography variant="h6" fontWeight={600}>{currentUser?.email || '—'}</Typography>
-            </Box>
-          </Box>
-          <Divider />
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2 }}>
-            <LockIcon color="primary" sx={{ fontSize: 28 }} />
-            <Box sx={{ flexGrow: 1 }}>
-              <Typography variant="subtitle2" color="text.secondary">Password</Typography>
-              <Typography variant="h6" fontWeight={600} sx={{ letterSpacing: 2 }}>••••••••</Typography>
-            </Box>
-            <Button
-              variant="outlined"
-              onClick={() => setOpenPasswordDialog(true)}
+
+          <Box
+            sx={{
+              px: { xs: 2.5, sm: 3.5 },
+              pt: 0.5,
+              pb: 2.5,
+              textAlign: 'center',
+            }}
+          >
+            <Box
               sx={{
-                borderRadius: 2,
-                fontWeight: 600,
-                borderColor: 'primary.main',
-                color: 'primary.main',
-                px: 2.5,
-                '&:hover': {
-                  bgcolor: 'primary.main',
-                  color: 'white',
-                  borderColor: 'primary.main',
-                },
-                transition: 'all 0.2s',
+                display: 'inline-flex',
+                p: '3px',
+                borderRadius: '50%',
+                background: (t) =>
+                  `linear-gradient(135deg, ${t.palette.primary.main}, ${t.palette.secondary.main})`,
+                boxShadow: (t) => `0 12px 32px ${alpha(t.palette.primary.main, 0.35)}`,
+                mb: 2,
               }}
             >
-              Change Password
-            </Button>
+              <Avatar
+                src={currentUser?.photoURL || undefined}
+                alt=""
+                sx={{
+                  width: 88,
+                  height: 88,
+                  fontSize: 32,
+                  fontWeight: 700,
+                  bgcolor: 'background.paper',
+                  color: 'primary.main',
+                  border: '3px solid',
+                  borderColor: 'background.paper',
+                }}
+              >
+                {!currentUser?.photoURL ? profileInitials : null}
+              </Avatar>
+            </Box>
+
+            <Typography
+              variant="overline"
+              sx={{
+                letterSpacing: 2,
+                color: 'text.secondary',
+                fontWeight: 600,
+                display: 'block',
+                mb: 0.5,
+              }}
+            >
+              Account
+            </Typography>
+            <Typography variant="h4" component="h1" fontWeight={800} sx={{ letterSpacing: -0.5, mb: 0.5 }}>
+              Your profile
+            </Typography>
           </Box>
-        </Stack>
+
+          <Stack spacing={2} sx={{ px: { xs: 2, sm: 3 }, pb: 3 }}>
+            {error && (
+              <Alert severity="error" sx={{ borderRadius: 2 }}>
+                {error}
+              </Alert>
+            )}
+
+            {success && (
+              <Alert severity="success" sx={{ borderRadius: 2 }}>
+                {success}
+              </Alert>
+            )}
+
+            <Box sx={fieldShellSx}>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Box sx={iconWrapSx}>
+                  <AccountCircleIcon sx={{ fontSize: 22 }} />
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                    Name
+                  </Typography>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ mt: 0.25 }}>
+                    {currentUser?.displayName || '—'}
+                  </Typography>
+                </Box>
+                <IconButton
+                  size="small"
+                  onClick={() => setOpenNameDialog(true)}
+                  aria-label="Edit name"
+                  sx={{
+                    color: 'primary.main',
+                    bgcolor: (t) => alpha(t.palette.primary.main, 0.1),
+                    '&:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.2) },
+                  }}
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+              </Stack>
+            </Box>
+
+            <Box sx={fieldShellSx}>
+              <Stack direction="row" spacing={2} alignItems="flex-start">
+                <Box sx={iconWrapSx}>
+                  <EmailIcon sx={{ fontSize: 20 }} />
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                    Email
+                  </Typography>
+                  <Typography
+                    variant="subtitle1"
+                    fontWeight={700}
+                    sx={{ mt: 0.25, wordBreak: 'break-word', lineHeight: 1.45 }}
+                  >
+                    {currentUser?.email || '—'}
+                  </Typography>
+                </Box>
+              </Stack>
+            </Box>
+
+            <Box sx={fieldShellSx}>
+              <Stack direction="row" spacing={2} alignItems="center" sx={{ flexWrap: 'nowrap' }}>
+                <Stack direction="row" spacing={2} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
+                  <Box sx={iconWrapSx}>
+                    <LockIcon sx={{ fontSize: 20 }} />
+                  </Box>
+                  <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                      Password
+                    </Typography>
+                    <Typography variant="subtitle1" fontWeight={700} sx={{ mt: 0.25, letterSpacing: 3 }}>
+                      ••••••••
+                    </Typography>
+                  </Box>
+                </Stack>
+                <Button
+                  variant="contained"
+                  onClick={() => setOpenPasswordDialog(true)}
+                  aria-label="Change password"
+                  sx={{
+                    flexShrink: 0,
+                    width: 'auto',
+                    minWidth: { sm: 168 },
+                    px: { xs: 1.5, sm: 2.5 },
+                    py: { xs: 0.65, sm: 1.25 },
+                    minHeight: { xs: 40, sm: 42 },
+                    fontSize: { xs: '0.75rem', sm: '0.875rem' },
+                    whiteSpace: 'nowrap',
+                    borderRadius: 2,
+                    boxShadow: (t) => `0 8px 24px ${alpha(t.palette.primary.main, 0.35)}`,
+                    background: (t) =>
+                      `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${alpha(t.palette.primary.dark, 0.95)} 100%)`,
+                    '&:hover': {
+                      boxShadow: (t) => `0 12px 28px ${alpha(t.palette.primary.main, 0.45)}`,
+                    },
+                  }}
+                >
+                  <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>
+                    Change
+                  </Box>
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+                    Change password
+                  </Box>
+                </Button>
+              </Stack>
+            </Box>
+
+            <Box sx={fieldShellSx}>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Box sx={iconWrapSx}>
+                  <NotificationsActiveIcon sx={{ fontSize: 20 }} />
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                    Daily reminders
+                  </Typography>
+                  <Typography variant="subtitle2" sx={{ mt: 0.25, color: 'text.secondary' }}>
+                    Send a push reminder 2 hours before midnight if today’s challenges aren’t logged.
+                  </Typography>
+                </Box>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={pushRemindersEnabled}
+                      onChange={async (_e, checked) => {
+                        if (!currentUser?.uid) return;
+                        setError('');
+                        setSuccess('');
+                        setPushLoading(true);
+                        try {
+                          await updateUserData(currentUser.uid, { pushRemindersEnabled: checked });
+                          setPushRemindersEnabled(checked);
+
+                          if (checked) {
+                            // Allow a fresh attempt from toggle.
+                            localStorage.removeItem(`pushSetupAttempted:${currentUser.uid}`);
+                            await ensureWebPushEnabled(currentUser.uid);
+                          }
+
+                          setSuccess(checked ? 'Daily reminders enabled.' : 'Daily reminders disabled.');
+                        } catch (e) {
+                          console.error('Failed to update reminder preference:', e);
+                          setError('Failed to update reminder preference. Please try again.');
+                        } finally {
+                          setPushLoading(false);
+                        }
+                      }}
+                      disabled={pushLoading || loading}
+                      inputProps={{ 'aria-label': 'Enable daily reminders' }}
+                    />
+                  }
+                  label=""
+                  sx={{ m: 0 }}
+                />
+              </Stack>
+            </Box>
+          </Stack>
 
         {/* Name Update Dialog */}
         <Dialog 
@@ -505,7 +683,8 @@ const ProfilePage: React.FC = () => {
           </DialogActions>
         </Dialog>
       </Paper>
-    </Container>
+      </Container>
+    </Box>
   );
 };
 

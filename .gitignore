@@ -45,6 +45,7 @@ test-results/
 # Python
 __pycache__/
 *.py[cod]
+.venv/
 
 # Misc
 *.pem

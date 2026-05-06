@@ -130,6 +130,7 @@ describe('DashboardPage (feature regression)', () => {
         id: '12345',
         name: 'No Sugar',
         duration: 30,
+        cadence: 'daily',
         completedDays: 0,
       })
     );

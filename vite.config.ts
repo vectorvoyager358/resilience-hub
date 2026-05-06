@@ -14,22 +14,16 @@ function viteAppBase(): string {
 
 const base = viteAppBase();
 
-function workboxMode(): 'production' | 'development' {
-  // On Node 23, Workbox's SW bundling sometimes trips an "Unexpected early exit" in terser.
-  // Dev mode avoids terser minification and makes builds reliable across Node versions.
-  const major = Number(process.versions.node.split('.')[0] || 0);
-  return major >= 22 ? 'development' : 'production';
-}
-
 // https://vitejs.dev/config/
 export default defineConfig({
   base,
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
-      workbox: {
-        mode: workboxMode(),
-      },
+      injectRegister: 'auto',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       manifest: {
         name: 'Resilience Hub',
         short_name: 'Resilience',
@@ -68,18 +62,19 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    minify: 'esbuild',
     chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-mui': ['@mui/material', '@mui/icons-material'],
-          'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+          'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/messaging'],
         }
       }
     }
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react-router-dom', 'firebase/app', 'firebase/auth', 'firebase/firestore']
+    include: ['react', 'react-dom', 'react-router-dom', 'firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/messaging']
   }
 }); 

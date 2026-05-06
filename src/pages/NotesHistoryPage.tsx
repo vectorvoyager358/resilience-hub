@@ -39,7 +39,16 @@ import { Challenge, User } from '../types';
 import ChatAssistant from '../components/ChatAssistant';
 import { useAuth } from '../contexts/AuthContext';
 import { getUserData } from '../services/firestore';
-import { normalizeUserChallenges } from '../utils/challengeProgress';
+import {
+  normalizeUserChallenges,
+  getChallengeCadence,
+  getWeeklySlotLocalDateRange,
+  formatCadenceLabel,
+} from '../utils/challengeProgress';
+
+function toLocalYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -234,36 +243,47 @@ const NotesHistoryPage: React.FC = () => {
       .sort(([dayA], [dayB]) => Number(dayB) - Number(dayA))
       .filter(([day]) => {
         if (!isFiltering) return true;
-        // Calculate the actual date from the challenge start date and day number
-        const dayNumber = parseInt(day);
+        const slotNumber = parseInt(day, 10);
+        if (getChallengeCadence(challenge) === 'weekly') {
+          const { start, end } = getWeeklySlotLocalDateRange(challenge, slotNumber);
+          start.setHours(0, 0, 0, 0);
+          end.setHours(0, 0, 0, 0);
+          const weekStartKey = toLocalYmd(start);
+          const weekEndKey = toLocalYmd(end);
+          const afterStart = !startDateStr || weekEndKey >= startDateStr;
+          const beforeEnd = !endDateStr || weekStartKey <= endDateStr;
+          return afterStart && beforeEnd;
+        }
         const challengeStartDate = new Date(challenge.startDate);
         const noteDate = new Date(challengeStartDate);
         noteDate.setHours(0, 0, 0, 0);
-        noteDate.setDate(challengeStartDate.getDate() + (dayNumber - 1));
-        // Format noteDate as YYYY-MM-DD
-        const noteDateKey = `${noteDate.getFullYear()}-${String(noteDate.getMonth() + 1).padStart(2, '0')}-${String(noteDate.getDate()).padStart(2, '0')}`;
-        let isAfterStart = true;
-        let isBeforeEnd = true;
-        if (startDateStr) {
-          // Compare as YYYY-MM-DD
-          isAfterStart = noteDateKey >= startDateStr;
-        }
-        if (endDateStr) {
-          isBeforeEnd = noteDateKey <= endDateStr;
-        }
+        noteDate.setDate(challengeStartDate.getDate() + (slotNumber - 1));
+        const noteDateKey = toLocalYmd(noteDate);
+        const isAfterStart = !startDateStr || noteDateKey >= startDateStr;
+        const isBeforeEnd = !endDateStr || noteDateKey <= endDateStr;
         return isAfterStart && isBeforeEnd;
       })
       .map(([day, note]) => {
-        // Calculate the actual date from the challenge start date and day number
-        const dayNumber = parseInt(day);
+        const slotNumber = parseInt(day, 10);
+        if (getChallengeCadence(challenge) === 'weekly') {
+          const { start, end } = getWeeklySlotLocalDateRange(challenge, slotNumber);
+          start.setHours(0, 0, 0, 0);
+          return {
+            day,
+            note,
+            date: start,
+            dateEnd: end,
+          };
+        }
         const challengeStartDate = new Date(challenge.startDate);
         const noteDate = new Date(challengeStartDate);
         noteDate.setHours(0, 0, 0, 0);
-        noteDate.setDate(challengeStartDate.getDate() + (dayNumber - 1));
+        noteDate.setDate(challengeStartDate.getDate() + (slotNumber - 1));
         return {
           day,
           note,
-          date: noteDate
+          date: noteDate,
+          dateEnd: undefined as Date | undefined,
         };
       });
   };
@@ -689,10 +709,24 @@ const NotesHistoryPage: React.FC = () => {
                         <FitnessCenterIcon sx={{ fontSize: 18 }} />
                       </Avatar>
                       {getSelectedChallenge()?.name}
+                      {getSelectedChallenge() ? (
+                        <Chip
+                          label={formatCadenceLabel(getChallengeCadence(getSelectedChallenge()!))}
+                          size="small"
+                          variant="outlined"
+                          color={getChallengeCadence(getSelectedChallenge()!) === 'weekly' ? 'secondary' : 'default'}
+                          sx={{ height: 24, fontWeight: 600 }}
+                        />
+                      ) : null}
                       <Chip 
-                        label={getSelectedChallenge()?.completedDays === getSelectedChallenge()?.duration
-                          ? `${getSelectedChallenge()?.completedDays}/${getSelectedChallenge()?.duration} Complete! 🏆`
-                          : `${getSelectedChallenge()?.completedDays}/${getSelectedChallenge()?.duration} days`} 
+                        label={(() => {
+                          const ch = getSelectedChallenge();
+                          if (!ch) return '';
+                          const unit = getChallengeCadence(ch) === 'weekly' ? 'weeks' : 'days';
+                          return ch.completedDays === ch.duration
+                            ? `${ch.completedDays}/${ch.duration} Complete! 🏆`
+                            : `${ch.completedDays}/${ch.duration} ${unit}`;
+                        })()} 
                         size="small" 
                         color={getSelectedChallenge()?.completedDays === getSelectedChallenge()?.duration ? "success" : "primary"} 
                         variant={getSelectedChallenge()?.completedDays === getSelectedChallenge()?.duration ? "filled" : "outlined"}
@@ -708,7 +742,7 @@ const NotesHistoryPage: React.FC = () => {
                   
                   {getFilteredChallengeNotes().length > 0 ? (
                     <Grid container spacing={2}>
-                      {getFilteredChallengeNotes().map(({ day, note, date }, index) => (
+                      {getFilteredChallengeNotes().map(({ day, note, date, dateEnd }, index) => (
                         <Grid item xs={12} key={day}>
                           <Zoom in={true} style={{ transitionDelay: `${index * 100}ms` }}>
                             <Paper 
@@ -724,7 +758,11 @@ const NotesHistoryPage: React.FC = () => {
                             >
                               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
                                 <Chip 
-                                  label={`Day ${day} of ${getSelectedChallenge()?.duration} ✅`} 
+                                  label={
+                                    getSelectedChallenge() && getChallengeCadence(getSelectedChallenge()!) === 'weekly'
+                                      ? `Week ${day} of ${getSelectedChallenge()?.duration} ✅`
+                                      : `Day ${day} of ${getSelectedChallenge()?.duration} ✅`
+                                  } 
                                   color="success" 
                                   sx={{ 
                                     borderRadius: 1,
@@ -733,11 +771,13 @@ const NotesHistoryPage: React.FC = () => {
                                 />
                                 <Divider orientation="vertical" flexItem sx={{ mx: 2 }} />
                                 <Typography variant="caption" color="text.secondary">
-                                  {date.toLocaleDateString(undefined, {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric'
-                                  })}
+                                  {dateEnd
+                                    ? `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${dateEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
+                                    : date.toLocaleDateString(undefined, {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: 'numeric'
+                                      })}
                                 </Typography>
                               </Box>
                               <Typography 

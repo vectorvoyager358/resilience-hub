@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 
 import { clientsClaim } from 'workbox-core';
-import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
-import { NetworkFirst } from 'workbox-strategies';
+import { NavigationRoute } from 'workbox-routing';
 
 import { initializeApp } from 'firebase/app';
 import { getMessaging, onBackgroundMessage } from 'firebase/messaging/sw';
@@ -21,13 +21,9 @@ cleanupOutdatedCaches();
 // Precache Vite build assets.
 precacheAndRoute(self.__WB_MANIFEST);
 
-// Make SPA navigations resilient on GitHub Pages / Cloud Run.
-registerRoute(
-  ({ request }) => request.mode === 'navigate',
-  new NetworkFirst({
-    cacheName: 'pages',
-  })
-);
+// SPA fallback for deep links (e.g. /profile) on GitHub Pages.
+// Serve the precached app shell (index.html) for navigations.
+registerRoute(new NavigationRoute(createHandlerBoundToURL(import.meta.env.BASE_URL + 'index.html')));
 
 // ---- FCM background notifications ----
 const firebaseConfig = {

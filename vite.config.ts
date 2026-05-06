@@ -8,6 +8,13 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: 'auto',
+      workbox: {
+        mode: 'development',
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+      },
       manifest: {
         name: 'Resilience Hub',
         short_name: 'Resilience',
@@ -46,6 +53,7 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    minify: 'esbuild',
     chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {

@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
+import { registerSW } from 'virtual:pwa-register'
 
 // Add error logging
 window.onerror = function(message, source, lineno, colno, error) {
@@ -15,6 +16,15 @@ window.onunhandledrejection = function(event) {
 };
 
 console.log('Starting application...');
+
+registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    window.location.reload();
+  },
+  onOfflineReady() {
+  },
+});
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component<

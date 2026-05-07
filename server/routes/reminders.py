@@ -194,13 +194,16 @@ def send_daily_reminders():
             results.append(ReminderResult(uid=uid, sent=False, reason="nothing_to_remind", incomplete=[]))
             continue
 
-        title = "Resilience Hub reminder"
-        body = "Pending challenges: " + ", ".join(incomplete[:8]) + ("…" if len(incomplete) > 8 else "")
+        title = "Resilience Hub"
+        shown = incomplete[:3]
+        remaining = max(0, len(incomplete) - len(shown))
+        more = f" (+{remaining} more)" if remaining else ""
+        body = "Keep your streak alive. Log: " + ", ".join(shown) + more + "."
 
         # Data-only message to avoid duplicate notifications on some clients.
         # The service worker (web/PWA) will display the notification.
         message = messaging.MulticastMessage(
-            data={"url": "/dashboard", "title": title, "body": body},
+            data={"url": "/dashboard?pending=1", "title": title, "body": body},
             tokens=tokens,
         )
 

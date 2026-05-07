@@ -98,6 +98,11 @@ def _compute_incomplete_challenges_for_today(
         if not isinstance(name, str) or not name.strip():
             continue
 
+        cadence = ch.get("cadence")
+        if cadence not in ("daily", "weekly", None):
+            cadence = None
+        cadence = cadence or "daily"
+
         duration = ch.get("duration")
         try:
             duration_int = int(duration)
@@ -115,14 +120,22 @@ def _compute_incomplete_challenges_for_today(
         tz: ZoneInfo = today_local_date.tzinfo  # type: ignore[attr-defined]
         start_local_date = start_dt_utc.astimezone(tz).date()
 
-        day_index = (today_local_date.date() - start_local_date).days + 1
-        if day_index < 1 or day_index > duration_int:
-            continue  # not active today
+        days_since_start = (today_local_date.date() - start_local_date).days
+        if cadence == "weekly":
+            # Weekly challenges: duration is number of week-slots since startDate.
+            # Week 1 is days 0..6 since start; week 2 is 7..13, etc.
+            slot_index = (days_since_start // 7) + 1
+        else:
+            # Daily challenges: slot index is calendar days since start + 1.
+            slot_index = days_since_start + 1
+
+        if slot_index < 1 or slot_index > duration_int:
+            continue  # not active in current slot
 
         notes = ch.get("notes") or {}
         if not isinstance(notes, dict):
             notes = {}
-        note_value = notes.get(str(day_index))
+        note_value = notes.get(str(slot_index))
         content = _note_content(note_value).strip()
         if content:
             continue  # done

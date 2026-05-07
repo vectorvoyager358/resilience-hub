@@ -68,7 +68,7 @@ const ProfilePage: React.FC = () => {
     special: true
   });
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
-  const [pushRemindersEnabled, setPushRemindersEnabled] = useState(true);
+  const [pushRemindersEnabled, setPushRemindersEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
 
   useEffect(() => {

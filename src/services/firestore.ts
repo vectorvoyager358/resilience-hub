@@ -88,6 +88,23 @@ export const upsertUserPushSettings = async (
   }
 };
 
+export const upsertUserTimezone = async (uid: string, timezone: string) => {
+  try {
+    await setDoc(
+      doc(db, 'users', uid),
+      ({
+        timezone,
+        timezoneUpdatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }) satisfies Record<string, unknown>,
+      { merge: true }
+    );
+  } catch (error) {
+    console.error('Error updating user timezone:', error);
+    throw error;
+  }
+};
+
 // Challenge Operations
 export const updateChallenges = async (uid: string, challenges: Challenge[]) => {
   try {

@@ -17,6 +17,7 @@ import {
   UserCredential
 } from 'firebase/auth';
 import { auth } from '../services/firebase';
+import { upsertUserTimezone } from '../services/firestore';
 
 // Store auth state in localStorage to help with persistence
 const AUTH_STATE_KEY = 'resilience_hub_auth_state';
@@ -182,6 +183,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       setCurrentUser(user);
       setLoading(false);
+
+      try {
+        if (user) {
+          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          upsertUserTimezone(user.uid, tz).catch((e) => {
+            console.warn('Failed to upsert user timezone:', e);
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to read browser timezone:', e);
+      }
       
       // If we have a user, store that in localStorage
       try {

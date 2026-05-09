@@ -12,12 +12,13 @@ vi.mock('../contexts/AuthContext', () => ({
 
 const updateChallengesMock = vi.fn();
 const updateDailyNotesMock = vi.fn();
-const createUserDocumentMock = vi.fn();
+const ensureUserDocumentShellMock = vi.fn();
 vi.mock('../services/firestore', () => ({
   getUserData: vi.fn(),
   updateChallenges: (...args: unknown[]) => updateChallengesMock(...args),
   updateDailyNotes: (...args: unknown[]) => updateDailyNotesMock(...args),
-  createUserDocument: (...args: unknown[]) => createUserDocumentMock(...args),
+  ensureUserDocumentShell: (...args: unknown[]) =>
+    ensureUserDocumentShellMock(...args),
 }));
 
 const upsertChallengeDataMock = vi.fn();
@@ -42,15 +43,29 @@ vi.mock('../components/ChatAssistant', () => ({ default: () => null }));
 vi.mock('./NotesHistoryPage', () => ({ default: () => null }));
 vi.mock('@mui/material/useMediaQuery', () => ({ default: () => false }));
 
-const getDocMock = vi.fn();
+const onSnapshotMock = vi.fn();
 vi.mock('firebase/firestore', () => ({
   doc: vi.fn(() => ({ __doc: true })),
-  getDoc: (...args: unknown[]) => getDocMock(...args),
+  onSnapshot: (...args: unknown[]) => onSnapshotMock(...args),
   updateDoc: vi.fn(),
 }));
 
+/** Mutable snapshot wired into onSnapshot mock (Firestore listener). */
+const defaultUserPayload = (): Record<string, unknown> => ({
+  uid: 'u1',
+  name: 'Test User',
+  challenges: [],
+  dailyNotes: {},
+});
+
+let firestoreSnap = {
+  exists: true as boolean,
+  payload: defaultUserPayload(),
+};
+
 vi.mock('../services/firebase', () => ({
   db: {},
+  auth: { currentUser: { uid: 'u1', displayName: 'Test User' } },
 }));
 
 import DashboardPage from './DashboardPage';
@@ -67,12 +82,27 @@ beforeEach(() => {
   vi.restoreAllMocks();
   updateChallengesMock.mockReset();
   updateDailyNotesMock.mockReset();
-  createUserDocumentMock.mockReset();
+  ensureUserDocumentShellMock.mockReset().mockResolvedValue(undefined);
   upsertChallengeDataMock.mockReset();
   upsertDailyReflectionMock.mockReset();
-  getDocMock.mockReset();
+  onSnapshotMock.mockReset();
   tryUpsertToPineconeMock.mockReset();
   updatePineconeNoteMock.mockReset();
+
+  firestoreSnap = { exists: true, payload: defaultUserPayload() };
+
+  onSnapshotMock.mockImplementation(
+    (_ref: unknown, onNext: (s: Record<string, unknown>) => void) => {
+      queueMicrotask(() => {
+        const snap = {
+          exists: () => firestoreSnap.exists,
+          data: () => firestoreSnap.payload,
+        };
+        onNext(snap);
+      });
+      return vi.fn();
+    },
+  );
 
   // Avoid dialog validations / alerts breaking tests.
   (globalThis as unknown as { alert: unknown }).alert = vi.fn();
@@ -87,16 +117,6 @@ beforeEach(() => {
     },
     loading: false,
     logout: vi.fn(),
-  });
-
-  getDocMock.mockResolvedValue({
-    exists: () => true,
-    data: () => ({
-      uid: 'u1',
-      name: 'Test User',
-      challenges: [],
-      dailyNotes: {},
-    }),
   });
 
   tryUpsertToPineconeMock.mockResolvedValue(undefined);
@@ -166,9 +186,9 @@ describe('DashboardPage (feature regression)', () => {
 
   it('marks today complete by saving a challenge note and persisting via updateChallenges', async () => {
     const startDate = new Date().toISOString();
-    getDocMock.mockResolvedValue({
-      exists: () => true,
-      data: () => ({
+    firestoreSnap = {
+      exists: true,
+      payload: {
         uid: 'u1',
         name: 'Test User',
         challenges: [
@@ -182,8 +202,8 @@ describe('DashboardPage (feature regression)', () => {
           },
         ],
         dailyNotes: {},
-      }),
-    });
+      },
+    };
 
     updateChallengesMock.mockResolvedValue(undefined);
 
@@ -205,9 +225,9 @@ describe('DashboardPage (feature regression)', () => {
 
   it("edits today's note and calls updatePineconeNote", async () => {
     const startDate = new Date().toISOString();
-    getDocMock.mockResolvedValue({
-      exists: () => true,
-      data: () => ({
+    firestoreSnap = {
+      exists: true,
+      payload: {
         uid: 'u1',
         name: 'Test User',
         challenges: [
@@ -223,8 +243,8 @@ describe('DashboardPage (feature regression)', () => {
           },
         ],
         dailyNotes: {},
-      }),
-    });
+      },
+    };
 
     updateChallengesMock.mockResolvedValue(undefined);
     updatePineconeNoteMock.mockResolvedValue({ status: 'success', message: 'ok', vectorId: 'vid-2' });

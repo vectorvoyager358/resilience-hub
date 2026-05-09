@@ -77,6 +77,7 @@ self.addEventListener('notificationclick', (event) => {
     return `${trimmedBase}${trimmedPath}`;
   })();
   const absoluteUrl = new URL(normalizedPath, self.location.origin).toString();
+  const appOrigin = self.location.origin;
 
   event.waitUntil(
     (async () => {
@@ -85,10 +86,27 @@ self.addEventListener('notificationclick', (event) => {
         includeUncontrolled: true,
       });
 
-      for (const client of allClients) {
-        if ('focus' in client) {
-          await (client as WindowClient).focus();
-          (client as WindowClient).navigate(absoluteUrl);
+      // Prefer an existing app window on this origin (avoid focusing arbitrary clients first).
+      const appClient = allClients.find((c): c is WindowClient => {
+        if (!('focus' in c)) return false;
+        try {
+          return new URL(c.url).origin === appOrigin;
+        } catch {
+          return false;
+        }
+      }) ?? null;
+
+      if (
+        appClient &&
+        typeof (appClient as WindowClient).navigate === 'function'
+      ) {
+        await appClient.focus();
+        try {
+          await appClient.navigate(absoluteUrl);
+          return;
+        } catch (e) {
+          console.warn('windowClient.navigate failed, falling back:', e);
+          await self.clients.openWindow(absoluteUrl);
           return;
         }
       }

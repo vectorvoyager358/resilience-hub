@@ -23,10 +23,31 @@ export const createUserDocument = async (uid: string, userData: User) => {
     await setDoc(doc(db, 'users', uid), {
       ...userData,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Error creating user document:', error);
+    throw error;
+  }
+};
+
+/**
+ * Minimal user row for accounts that authenticated before a Firestore doc existed.
+ * merge: never pass challenges/dailyNotes here — would overwrite real data on races.
+ */
+export const ensureUserDocumentShell = async (uid: string, displayName: string) => {
+  try {
+    await setDoc(
+      doc(db, 'users', uid),
+      {
+        uid,
+        name: displayName,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.error('Error ensuring user shell document:', error);
     throw error;
   }
 };

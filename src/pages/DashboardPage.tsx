@@ -74,7 +74,7 @@ import { Challenge, User } from '../types';
 import TypingAnimation from '../components/TypingAnimation';
 import ChatAssistant from '../components/ChatAssistant';
 import { useAuth } from '../contexts/AuthContext';
-import { updateChallenges, updateDailyNotes, createUserDocument } from '../services/firestore';
+import { updateChallenges, updateDailyNotes, ensureUserDocumentShell } from '../services/firestore';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import NotesHistoryPage from './NotesHistoryPage';
 import ClickAwayListener from '@mui/material/ClickAwayListener';
@@ -82,8 +82,8 @@ import Fuse from 'fuse.js';
 import PeopleIcon from '@mui/icons-material/People';
 import { tryUpsertToPinecone, tryDeleteFromPinecone } from '../utils/api';
 import { upsertChallengeData, upsertDailyReflection } from '../services/pinecone';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../services/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
 import { updatePineconeNote } from '../utils/api';
 import { Note } from '../types';
 import {
@@ -551,44 +551,96 @@ const DashboardPage: React.FC = () => {
     { icon: <LogoutIcon />, name: 'Sign Out', onClick: handleSignOut }
   ];
 
-  // Load user data from Firestore
+  // Live-sync user doc — first emission is often cache-only; hiding the loader early flashes empty UI before server data.
   useEffect(() => {
-    const loadUserData = async () => {
-      if (!currentUser?.uid) {
-        navigate('/login');
-        return;
-      }
+    let cancelled = false;
+    const uid = currentUser?.uid;
+    if (!uid) {
+      navigate('/login');
+      return;
+    }
 
-      try {
-        setLoading(true);
-        setError(null);
-        const userDocRef = doc(db, 'users', currentUser.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        if (userDoc.exists()) {
-          const raw = userDoc.data() as User;
-          setUserData(normalizeUserChallenges(raw));
-        } else {
-          // Initialize user data if it doesn't exist
-          const initialData: User = {
-            uid: currentUser.uid,
-            name: currentUser.displayName || '',
-            challenges: [],
-            dailyNotes: {}
-          };
-          await createUserDocument(currentUser.uid, initialData);
-          setUserData(initialData);
-        }
-      } catch (err) {
-        console.error('Error loading user data:', err);
-        setError('Failed to load dashboard data. Please try refreshing the page.');
-      } finally {
-        setLoading(false);
-      }
+    setLoading(true);
+    setError(null);
+
+    const userDocRef = doc(db, 'users', uid);
+    let requestedShell = false;
+
+    /** When online, wait for server (or fallback) before ending the splash so cache→server never shows a wrong empty frame. */
+    const LOAD_RELEASE_MAX_MS = 2500;
+    let loadReleased = false;
+    const releaseLoadOnce = () => {
+      if (cancelled || loadReleased) return;
+      loadReleased = true;
+      setLoading(false);
     };
 
-    loadUserData();
-  }, [currentUser, navigate]);
+    const fallbackTimer = window.setTimeout(() => {
+      releaseLoadOnce();
+    }, LOAD_RELEASE_MAX_MS);
+
+    const shouldTrustSnapshotForUi = (snapshot: { metadata?: { fromCache?: boolean } }) => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return true;
+      // Undefined metadata (tests) behaves like server-backed.
+      return snapshot.metadata?.fromCache !== true;
+    };
+
+    const unsub = onSnapshot(
+      userDocRef,
+      (snapshot) => {
+        if (cancelled) return;
+        try {
+          if (!snapshot.exists()) {
+            if (!requestedShell) {
+              requestedShell = true;
+              const displayName = auth.currentUser?.displayName || '';
+              ensureUserDocumentShell(uid, displayName).catch((err) => {
+                console.error('Error ensuring user document shell:', err);
+              });
+            }
+            setUserData((prev) => ({
+              ...prev,
+              uid,
+              name: auth.currentUser?.displayName || prev.name || '',
+              challenges: [],
+              dailyNotes: {},
+            }));
+            if (shouldTrustSnapshotForUi(snapshot)) {
+              window.clearTimeout(fallbackTimer);
+              releaseLoadOnce();
+            }
+            return;
+          }
+
+          const raw = snapshot.data() as User;
+          setUserData(normalizeUserChallenges(raw));
+          setError(null);
+          if (shouldTrustSnapshotForUi(snapshot)) {
+            window.clearTimeout(fallbackTimer);
+            releaseLoadOnce();
+          }
+        } catch (err) {
+          console.error('Error processing user snapshot:', err);
+          setError('Failed to load dashboard data. Please try refreshing the page.');
+          window.clearTimeout(fallbackTimer);
+          releaseLoadOnce();
+        }
+      },
+      (err) => {
+        if (cancelled) return;
+        console.error('User document listener error:', err);
+        setError('Failed to load dashboard data. Please try refreshing the page.');
+        window.clearTimeout(fallbackTimer);
+        releaseLoadOnce();
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallbackTimer);
+      unsub();
+    };
+  }, [currentUser?.uid, navigate]);
 
   useEffect(() => {
     if (!hasShownWelcome) {
@@ -1380,9 +1432,12 @@ const DashboardPage: React.FC = () => {
     );
   }
 
-  if (!userData.name) {
-    return null;
-  }
+  /** Firestore doc may omit `name` after merges; never blank-render the dashboard. */
+  const welcomeDisplayNameRaw =
+    userData.name?.trim() ||
+    currentUser?.displayName?.trim() ||
+    currentUser?.email?.split('@')[0]?.trim() ||
+    'Friend';
 
   return (
     <Container 
@@ -1443,7 +1498,7 @@ const DashboardPage: React.FC = () => {
                             fontSize: { xs: '1.5rem', sm: '1.75rem', md: '2rem' }
                           }}
                         >
-                          Welcome, {toTitleCase(userData.name)}!
+                          Welcome, {toTitleCase(welcomeDisplayNameRaw)}!
                         </Typography>
                       ) : (
                         <Box 
@@ -1460,7 +1515,7 @@ const DashboardPage: React.FC = () => {
                           }}
                         >
                           <TypingAnimation
-                            text={`Welcome, ${toTitleCase(userData.name)}!`}
+                            text={`Welcome, ${toTitleCase(welcomeDisplayNameRaw)}!`}
                             delay={500}
                             speed={50}
                           />

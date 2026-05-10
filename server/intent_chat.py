@@ -9,7 +9,9 @@ _FACT_PRIMARY = re.compile(
     r"\b("
     r"how\s+many|total\s+(number|count)|count\b|breakdown|statistics|"
     r"active\s+and\s+archived|weekly\s+and\s+daily|by\s+cadence|"
-    r"percent|percentage|\d+\s*%\s*complete"
+    r"percent|percentage|\d+\s*%\s*complete|"
+    r"each\s+challenge|every\s+challenge|all\s+(my\s+)?challenges|list\s+(of\s+)?my\s+challenges|"
+    r"duration\s+(for|of)|planned\s+duration|how\s+long\s+(is|are)"
     r")\b",
     re.I,
 )

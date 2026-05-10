@@ -41,6 +41,8 @@ def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 
     challenges = user_doc.get("challenges") or []
     if not isinstance(challenges, list):
         challenges = []
+    # Bound prompt size when users have many historical challenges
+    challenges = challenges[:48]
 
     for ch in challenges:
         if not isinstance(ch, dict):

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -104,6 +104,23 @@ interface ChatAssistantProps {
   userData: User;
 }
 
+/** Matches server `/api/chat-assistant` safety limits; keeps prompts bounded. */
+const MAX_MESSAGE_LENGTH = 2000;
+
+function createMessageId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function getTimeBasedGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   const [open, setOpen] = useState(() => loadPersistedChat(userData.uid)?.open ?? false);
   const [messages, setMessages] = useState<Message[]>(
@@ -126,20 +143,21 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [showCopyNotification, setShowCopyNotification] = useState(false);
+  const [starterNonce, setStarterNonce] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  /** Ensures only the latest send toggles `isLoading` off (avoids races when aborting). */
+  const sendGenerationRef = useRef(0);
 
-
-
-  // Get greeting based on time of day
-  const getTimeBasedGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Good morning";
-    if (hour < 18) return "Good afternoon";
-    return "Good evening";
-  };
+  useEffect(
+    () => () => {
+      fetchAbortRef.current?.abort();
+    },
+    [],
+  );
 
   // Generate personalized starter questions based on user's challenges
-  const getPersonalizedStarterQuestions = () => {
+  const getPersonalizedStarterQuestions = useCallback(() => {
     const defaultQuestions = [
       'How can I stay motivated during my challenge?',
       'What are some tips for building resilience?',
@@ -202,10 +220,9 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
     }
 
     return personalQuestions;
-  };
+  }, [userData?.challenges]);
 
-  // Create personalized welcome message
-  const getPersonalizedWelcomeMessage = () => {
+  const getPersonalizedWelcomeMessage = useCallback(() => {
     const greeting = getTimeBasedGreeting();
     const name = userData?.name || 'there';
     
@@ -238,9 +255,17 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
     
     welcomeMessage += ` How can I help you today?`;
     return welcomeMessage;
-  };
+  }, [userData?.name, userData?.challenges]);
 
-  const starterQuestions = useMemo(() => getPersonalizedStarterQuestions(), [userData?.challenges]);
+  const starterQuestions = useMemo(
+    () => getPersonalizedStarterQuestions(),
+    [getPersonalizedStarterQuestions, starterNonce],
+  );
+
+  const showStarterSuggestions =
+    messages.length === 1 &&
+    messages[0]?.sender === 'assistant' &&
+    !isLoading;
 
   useEffect(() => {
     if (typeof window === 'undefined' || !userData.uid) return;
@@ -262,23 +287,22 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   }, [open, messages, userData.uid]);
 
   useEffect(() => {
-    if (open && messages.length === 0) {
-      // Add welcome message when opened for the first time
-      try {
-        setMessages([
-          {
-            id: Date.now().toString(),
-            content: getPersonalizedWelcomeMessage(),
-            sender: 'assistant',
-            timestamp: new Date()
-          }
-        ]);
-      } catch (error) {
-        console.error("Error setting welcome message:", error);
-        setHasError(true);
-      }
+    if (!open || messages.length !== 0) return;
+    try {
+      setMessages([
+        {
+          id: createMessageId(),
+          content: getPersonalizedWelcomeMessage(),
+          sender: 'assistant',
+          timestamp: new Date(),
+        },
+      ]);
+      setStarterNonce((n) => n + 1);
+    } catch (error) {
+      console.error('Error setting welcome message:', error);
+      setHasError(true);
     }
-  }, [open, userData?.name, messages.length, userData?.challenges]);
+  }, [open, messages.length, getPersonalizedWelcomeMessage]);
 
   useEffect(() => {
     try {
@@ -290,7 +314,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   }, [messages]);
 
   const sendChatMessage = async (text: string) => {
-    const trimmed = text.trim();
+    const trimmed = text.trim().slice(0, MAX_MESSAGE_LENGTH);
     if (!trimmed || isLoading) return;
 
     const conversationHistory = messages.map((m) => ({
@@ -299,11 +323,16 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
     }));
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: createMessageId(),
       content: trimmed,
       sender: 'user',
       timestamp: new Date(),
     };
+
+    fetchAbortRef.current?.abort();
+    const ac = new AbortController();
+    fetchAbortRef.current = ac;
+    const generation = ++sendGenerationRef.current;
 
     setMessages((prev) => [...prev, userMessage]);
     setNewMessage('');
@@ -322,6 +351,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
           Authorization: `Bearer ${idToken}`,
         },
         credentials: 'include',
+        signal: ac.signal,
         body: JSON.stringify({
           message: trimmed,
           conversationHistory,
@@ -342,6 +372,9 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
         if (response.status === 401) {
           throw new Error('session');
         }
+        if (response.status === 404) {
+          throw new Error('profile');
+        }
         if (response.status === 503) {
           throw new Error('model');
         }
@@ -358,19 +391,25 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
 
       const plainTextResponse = convertMarkdownToPlainText(replyText);
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: createMessageId(),
         content: plainTextResponse,
         sender: 'assistant',
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       console.error('Chat assistant error:', error);
       let fallback =
         "I'm sorry, I'm having trouble connecting right now. Please try again later.";
       if (error instanceof Error) {
         if (error.message === 'session') {
           fallback = 'Please sign in again to use the assistant.';
+        } else if (error.message === 'profile') {
+          fallback =
+            'Your profile could not be loaded for the assistant. Try refreshing the page or signing in again.';
         } else if (error.message === 'model') {
           fallback =
             'The assistant is temporarily unavailable. Ensure the API server has GEMINI_API_KEY configured.';
@@ -380,14 +419,19 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
         }
       }
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: createMessageId(),
         content: fallback,
         sender: 'assistant',
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
-      setIsLoading(false);
+      if (fetchAbortRef.current === ac) {
+        fetchAbortRef.current = null;
+      }
+      if (sendGenerationRef.current === generation) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -400,17 +444,17 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   };
 
   const handleNewChat = () => {
-    setMessages([]);
+    fetchAbortRef.current?.abort();
     setNewMessage('');
-    // Trigger welcome message again
     setMessages([
       {
-        id: Date.now().toString(),
+        id: createMessageId(),
         content: getPersonalizedWelcomeMessage(),
         sender: 'assistant',
-        timestamp: new Date()
-      }
+        timestamp: new Date(),
+      },
     ]);
+    setStarterNonce((n) => n + 1);
   };
 
   const handleCopyMessage = async (content: string) => {
@@ -673,11 +717,11 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
             ))}
             
             {/* Starter Questions */}
-            {messages.length === 1 && (
+            {showStarterSuggestions && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1, width: '100%' }}>
                 {starterQuestions.map((question, index) => (
                   <Button
-                    key={index}
+                    key={`starter-${index}-${question.slice(0, 48)}`}
                     variant="outlined"
                     size="small"
                     onClick={() => handleStarterQuestionClick(question)}
@@ -741,8 +785,11 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
               variant="outlined"
               size="small"
               value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyPress={(e) => {
+              onChange={(e) =>
+                setNewMessage(e.target.value.slice(0, MAX_MESSAGE_LENGTH))
+              }
+              inputProps={{ maxLength: MAX_MESSAGE_LENGTH }}
+              onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSendMessage();
@@ -758,7 +805,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
                       color="text.secondary"
                       sx={{ mr: 1 }}
                     >
-                      {newMessage.length}/200
+                      {newMessage.length}/{MAX_MESSAGE_LENGTH}
                     </Typography>
                   </InputAdornment>
                 ),

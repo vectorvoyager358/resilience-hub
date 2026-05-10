@@ -19,6 +19,29 @@ logger = logging.getLogger(__name__)
 
 chat_routes = Blueprint("chat", __name__)
 
+MAX_USER_MESSAGE_CHARS = 4000
+MAX_HISTORY_TURNS = 14
+MAX_HISTORY_CONTENT_CHARS = 8000
+
+
+def _sanitize_chat_payload(message: str, history_raw: object) -> tuple[str, List[Dict[str, str]]]:
+    msg = message.strip()[:MAX_USER_MESSAGE_CHARS]
+    history: List[Dict[str, str]] = []
+    if isinstance(history_raw, list):
+        for item in history_raw[-MAX_HISTORY_TURNS:]:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = item.get("content")
+            if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                history.append(
+                    {
+                        "role": role,
+                        "content": content.strip()[:MAX_HISTORY_CONTENT_CHARS],
+                    }
+                )
+    return msg, history
+
 
 def _pinecone_matches_for_user(uid: str, query_text: str, top_k: int = 8) -> List[Dict[str, Any]]:
     try:
@@ -98,6 +121,7 @@ Rules:
 - Per-challenge **planned duration** for factual answers must come from `durationSummary` / `plannedSlots` / `totalCalendarDaysInPlannedWindow` inside those challenge list entries—not from memory or Rich context alone.
 - Retrieved memories may be incomplete (top-K search). Use them for themes, wording, and recall of past notes—not for statistics.
 - If memories are empty, rely on facts + rich context; do not invent past journal content.
+- Rich context lists challenge rows with notes for narrative color only. For ANY factual question about counts, active vs archived, lists, or durations, trust ONLY Authoritative facts (`challengeLists`, counts)—never enumerate “all challenges” from Rich context alone.
 - Rich context lists each challenge with `challengeStatus` ("active" | "archived") and `calendarWindowEnded` (boolean). For ANY challenge where `challengeStatus` is "archived", do NOT treat it as ongoing tracking—do not advise logging further days in that challenge window or imply they should "keep going" on that same timed challenge. Acknowledge it ended; answer with reflection, lessons, habits to carry forward, or starting a new challenge if appropriate.
 - When the user names a challenge, match it to the Rich context entry by name and respect that entry's `challengeStatus`.
 - Keep responses under 220 words, warm and encouraging.
@@ -133,20 +157,13 @@ def chat_assistant():
             return jsonify({"error": "unauthorized"}), 401
 
         payload = request.get_json(silent=True) or {}
-        message = payload.get("message")
-        if not isinstance(message, str) or not message.strip():
+        raw_message = payload.get("message")
+        if not isinstance(raw_message, str) or not raw_message.strip():
             return jsonify({"error": "message required"}), 400
 
-        history_raw = payload.get("conversationHistory")
-        history: List[Dict[str, str]] = []
-        if isinstance(history_raw, list):
-            for item in history_raw[-12:]:
-                if not isinstance(item, dict):
-                    continue
-                role = item.get("role")
-                content = item.get("content")
-                if role in ("user", "assistant") and isinstance(content, str) and content.strip():
-                    history.append({"role": role, "content": content.strip()})
+        message, history = _sanitize_chat_payload(raw_message, payload.get("conversationHistory"))
+        if not message:
+            return jsonify({"error": "message required"}), 400
 
         init_firebase_admin()
         db = firestore.Client()
@@ -161,7 +178,7 @@ def chat_assistant():
         use_rag = needs_semantic_retrieval(message)
         matches: List[Dict[str, Any]] = []
         if use_rag:
-            matches = _pinecone_matches_for_user(uid, message.strip())
+            matches = _pinecone_matches_for_user(uid, message)
 
         rag_block = _format_rag_lines(matches)
         history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
@@ -171,7 +188,7 @@ def chat_assistant():
             context_json=context_json,
             rag_block=rag_block,
             history_lines=history_lines,
-            user_message=message.strip(),
+            user_message=message,
         )
 
         try:

@@ -73,10 +73,36 @@ def _count_by_cadence(challenges: List[Dict[str, Any]]) -> Dict[str, int]:
     return out
 
 
-def build_assistant_facts(user_doc: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Structured counts for prompts — models must use this for aggregates, not RAG snippets.
-    """
+def _challenge_plan_summary(ch: Dict[str, Any]) -> Dict[str, Any]:
+    """Planned duration semantics match the app: daily = days; weekly = week-slots (each slot = 7 calendar days)."""
+    raw_name = ch.get("name")
+    name = raw_name.strip() if isinstance(raw_name, str) else ""
+    if not name:
+        name = "(unnamed)"
+    cadence = get_challenge_cadence(ch)
+    try:
+        slots = max(1, int(ch.get("duration") or 1))
+    except Exception:
+        slots = 1
+    if cadence == "weekly":
+        calendar_days = slots * 7
+        human = f"{slots} week-long slots ({calendar_days} calendar days in the planned window)"
+    else:
+        calendar_days = slots
+        human = f"{slots} days (daily)"
+
+    return {
+        "name": name,
+        "cadence": cadence,
+        "plannedSlots": slots,
+        "plannedSlotUnit": "weeks" if cadence == "weekly" else "days",
+        "totalCalendarDaysInPlannedWindow": calendar_days,
+        "durationSummary": human,
+    }
+
+
+def get_user_timezone_and_today(user_doc: Dict[str, Any]) -> tuple[ZoneInfo, date, str]:
+    """User's ZoneInfo, today's local date, and timezone label (for prompts)."""
     tz_name = user_doc.get("timezone")
     if not isinstance(tz_name, str) or not tz_name.strip():
         tz_name = "UTC"
@@ -87,7 +113,15 @@ def build_assistant_facts(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         tz_name = "UTC"
 
     now_local = datetime.now(tz)
-    today: date = now_local.date()
+    today = now_local.date()
+    return tz, today, tz_name
+
+
+def build_assistant_facts(user_doc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Structured counts for prompts — models must use this for aggregates, not RAG snippets.
+    """
+    tz, today, tz_name = get_user_timezone_and_today(user_doc)
     today_key = today.isoformat()
 
     raw_challenges = user_doc.get("challenges") or []
@@ -108,6 +142,7 @@ def build_assistant_facts(user_doc: Dict[str, Any]) -> Dict[str, Any]:
     reflection_days = [k for k in daily_notes.keys() if isinstance(k, str)]
     has_today = bool(daily_notes.get(today_key))
 
+    now_local = datetime.now(tz)
     return {
         "timezone": tz_name,
         "todayLocal": today_key,
@@ -118,6 +153,11 @@ def build_assistant_facts(user_doc: Dict[str, Any]) -> Dict[str, Any]:
             "archivedCount": len(archived),
             "activeByCadence": _count_by_cadence(active),
             "archivedByCadence": _count_by_cadence(archived),
+            # Authoritative per-challenge rows — use these for named lists; do not invent from Rich context.
+            "challengeLists": {
+                "active": [_challenge_plan_summary(c) for c in active],
+                "archived": [_challenge_plan_summary(c) for c in archived],
+            },
         },
         "dailyReflections": {
             "daysWithNote": len(reflection_days),

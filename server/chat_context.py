@@ -5,6 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+from server.assistant_facts import (
+    get_user_timezone_and_today,
+    is_challenge_past_calendar_duration,
+)
+
 
 def _note_text(val: Any) -> str:
     if val is None:
@@ -26,6 +31,7 @@ def _truncate(s: str, max_len: int) -> str:
 
 def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 400) -> Dict[str, Any]:
     name = user_doc.get("name")
+    tz, today, _tz_label = get_user_timezone_and_today(user_doc)
     out: Dict[str, Any] = {
         "name": name if isinstance(name, str) else "",
         "challenges": [],
@@ -62,6 +68,8 @@ def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 
 
         cadence = ch.get("cadence") if ch.get("cadence") in ("daily", "weekly") else "daily"
 
+        calendar_window_ended = is_challenge_past_calendar_duration(ch, today, tz)
+
         out["challenges"].append(
             {
                 "id": cid if isinstance(cid, str) else "",
@@ -69,6 +77,8 @@ def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 
                 "cadence": cadence,
                 "completedDays": cd,
                 "duration": max(1, dur),
+                "calendarWindowEnded": calendar_window_ended,
+                "challengeStatus": "archived" if calendar_window_ended else "active",
                 "recentChallengeNotes": note_snippets,
             }
         )

@@ -140,54 +140,67 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
 
   // Generate personalized starter questions based on user's challenges
   const getPersonalizedStarterQuestions = () => {
-    // Default questions if no challenges or fewer than 3 challenges
     const defaultQuestions = [
-      "How can I stay motivated during my challenge?",
-      "What are some tips for building resilience?",
-      "How do I handle setbacks in my journey?"
+      'How can I stay motivated during my challenge?',
+      'What are some tips for building resilience?',
+      'How do I handle setbacks in my journey?',
     ];
 
     if (!userData?.challenges || userData.challenges.length === 0) {
       return defaultQuestions;
     }
 
-    const personalQuestions = [];
-    
-    // Get a random challenge to generate question about
-    const randomChallenge = userData.challenges[Math.floor(Math.random() * userData.challenges.length)];
-    
-    // If user has challenges with progress, create specific questions
-    const hasStartedChallenges = userData.challenges.some((c: Challenge) => c.completedDays > 0);
-    const hasHighProgressChallenges = userData.challenges.some((c: Challenge) => (c.completedDays / c.duration) >= 0.7);
-    const hasLowProgressChallenges = userData.challenges.some((c: Challenge) => c.completedDays > 0 && (c.completedDays / c.duration) < 0.3);
-    
-    // Add specific questions based on challenges
+    const activeWindowChallenges = userData.challenges.filter(
+      (c) => !isChallengePastCalendarDuration(c),
+    );
+
+    const ratio = (c: Challenge) => c.completedDays / Math.max(1, c.duration);
+
+    // Only archived / ended windows: don't suggest named "improve my X challenge" as if ongoing
+    if (activeWindowChallenges.length === 0) {
+      return [
+        'What lessons can I take from my completed challenges?',
+        'What are some tips for building resilience?',
+        'How do I handle setbacks in my journey?',
+      ];
+    }
+
+    const personalQuestions: string[] = [];
+
+    const randomChallenge =
+      activeWindowChallenges[Math.floor(Math.random() * activeWindowChallenges.length)];
+
     if (randomChallenge) {
       personalQuestions.push(`How can I improve my ${randomChallenge.name} challenge?`);
     }
-    
+
+    const hasStartedChallenges = activeWindowChallenges.some((c) => c.completedDays > 0);
+    const hasHighProgressChallenges = activeWindowChallenges.some((c) => ratio(c) >= 0.7);
+    const hasLowProgressChallenges = activeWindowChallenges.some(
+      (c) => c.completedDays > 0 && ratio(c) < 0.3,
+    );
+
     if (hasStartedChallenges) {
-      personalQuestions.push("What should I do when I feel like skipping a day?");
+      personalQuestions.push('What should I do when I feel like skipping a day?');
     }
-    
+
     if (hasHighProgressChallenges) {
-      personalQuestions.push("How can I maintain my progress long-term?");
+      personalQuestions.push('How can I maintain my progress long-term?');
     }
-    
+
     if (hasLowProgressChallenges) {
-      personalQuestions.push("How can I build momentum with my challenges?");
+      personalQuestions.push('How can I build momentum with my challenges?');
     }
-    
-    // Ensure we have at least 3 questions by adding defaults if needed
+
     while (personalQuestions.length < 3) {
       const defaultQuestion = defaultQuestions.shift();
       if (defaultQuestion) {
         personalQuestions.push(defaultQuestion);
       } else {
-        break; // Just in case we run out of default questions
+        break;
       }
     }
-    
+
     return personalQuestions;
   };
 

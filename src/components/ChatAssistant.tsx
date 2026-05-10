@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -26,13 +26,9 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SearchIcon from '@mui/icons-material/Search';
 import type { Challenge, User } from '../types';
-import {
-  getLoggedStreakForChallenge,
-  getChallengeCadence,
-  hasCompletedCurrentNoteSlot,
-  getWeeklySlotLocalDateRange,
-} from '../utils/challengeProgress';
+import { isChallengePastCalendarDuration } from '../utils/challengeProgress';
 import { apiUrl } from '../utils/apiBase';
+import { auth } from '../services/firebase';
 
 interface Message {
   id: string;
@@ -41,12 +37,55 @@ interface Message {
   timestamp: Date;
 }
 
-// Initialize Gemini API in a secure way
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-if (!API_KEY) {
-  console.error('Gemini API key is not set. Please set VITE_GEMINI_API_KEY in your environment variables.');
+const CHAT_STORAGE_VERSION = 1;
+
+function chatStorageKey(uid: string): string {
+  return `resilience-hub-assistant-chat:v${CHAT_STORAGE_VERSION}:${uid}`;
 }
-const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent';
+
+type PersistedMessage = Omit<Message, 'timestamp'> & { timestamp: string };
+
+interface PersistedChatPayload {
+  v: typeof CHAT_STORAGE_VERSION;
+  open: boolean;
+  messages: PersistedMessage[];
+}
+
+function parseStoredMessages(data: unknown): Message[] {
+  if (!Array.isArray(data)) return [];
+  const out: Message[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== 'object') continue;
+    const m = item as Record<string, unknown>;
+    if (typeof m.id !== 'string' || typeof m.content !== 'string') continue;
+    if (m.sender !== 'user' && m.sender !== 'assistant') continue;
+    const ts = m.timestamp;
+    const d =
+      typeof ts === 'string'
+        ? new Date(ts)
+        : ts instanceof Date
+          ? ts
+          : new Date(NaN);
+    if (Number.isNaN(d.getTime())) continue;
+    out.push({ id: m.id, content: m.content, sender: m.sender, timestamp: d });
+  }
+  return out;
+}
+
+function loadPersistedChat(uid: string): { open: boolean; messages: Message[] } | null {
+  if (typeof window === 'undefined' || !uid) return null;
+  try {
+    const raw = window.localStorage.getItem(chatStorageKey(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedChatPayload;
+    if (parsed.v !== CHAT_STORAGE_VERSION || typeof parsed.open !== 'boolean') return null;
+    if (!Array.isArray(parsed.messages)) return null;
+    const messages = parseStoredMessages(parsed.messages);
+    return { open: parsed.open, messages };
+  } catch {
+    return null;
+  }
+}
 
 // Function to convert markdown to plain text
 const convertMarkdownToPlainText = (markdown: string): string => {
@@ -61,174 +100,209 @@ const convertMarkdownToPlainText = (markdown: string): string => {
     .trim();
 };
 
-function getLocalDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-
-/**
- * Retrieval (RAG): expects POST `/api/query-pinecone` on the Flask backend.
- * Route is not implemented in `pinecone.py` yet; failures fall back to empty matches.
- */
-const getRelevantContext = async (query: string, userId: string) => {
-  try {
-    const response = await fetch(apiUrl('/api/query-pinecone'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        userId,
-        query,
-      }),
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch context');
-    }
-    
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching context:', error);
-    return { matches: [] }; // Return empty matches array on error
-  }
-};
-
 interface ChatAssistantProps {
   userData: User;
 }
 
+/** Matches server `/api/chat-assistant` safety limits; keeps prompts bounded. */
+const MAX_MESSAGE_LENGTH = 2000;
+
+function createMessageId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function getTimeBasedGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [open, setOpen] = useState(() => loadPersistedChat(userData.uid)?.open ?? false);
+  const [messages, setMessages] = useState<Message[]>(
+    () => loadPersistedChat(userData.uid)?.messages ?? [],
+  );
+
+  useEffect(() => {
+    const restored = loadPersistedChat(userData.uid);
+    if (restored) {
+      setOpen(restored.open);
+      setMessages(restored.messages);
+    } else {
+      setOpen(false);
+      setMessages([]);
+    }
+  }, [userData.uid]);
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [showCopyNotification, setShowCopyNotification] = useState(false);
+  const [starterNonce, setStarterNonce] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  /** Ensures only the latest send toggles `isLoading` off (avoids races when aborting). */
+  const sendGenerationRef = useRef(0);
 
-
-
-  // Get greeting based on time of day
-  const getTimeBasedGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Good morning";
-    if (hour < 18) return "Good afternoon";
-    return "Good evening";
-  };
+  useEffect(
+    () => () => {
+      fetchAbortRef.current?.abort();
+    },
+    [],
+  );
 
   // Generate personalized starter questions based on user's challenges
-  const getPersonalizedStarterQuestions = () => {
-    // Default questions if no challenges or fewer than 3 challenges
+  const getPersonalizedStarterQuestions = useCallback(() => {
     const defaultQuestions = [
-      "How can I stay motivated during my challenge?",
-      "What are some tips for building resilience?",
-      "How do I handle setbacks in my journey?"
+      'How can I stay motivated during my challenge?',
+      'What are some tips for building resilience?',
+      'How do I handle setbacks in my journey?',
     ];
 
     if (!userData?.challenges || userData.challenges.length === 0) {
       return defaultQuestions;
     }
 
-    const personalQuestions = [];
-    
-    // Get a random challenge to generate question about
-    const randomChallenge = userData.challenges[Math.floor(Math.random() * userData.challenges.length)];
-    
-    // If user has challenges with progress, create specific questions
-    const hasStartedChallenges = userData.challenges.some((c: Challenge) => c.completedDays > 0);
-    const hasHighProgressChallenges = userData.challenges.some((c: Challenge) => (c.completedDays / c.duration) >= 0.7);
-    const hasLowProgressChallenges = userData.challenges.some((c: Challenge) => c.completedDays > 0 && (c.completedDays / c.duration) < 0.3);
-    
-    // Add specific questions based on challenges
+    const activeWindowChallenges = userData.challenges.filter(
+      (c) => !isChallengePastCalendarDuration(c),
+    );
+
+    const ratio = (c: Challenge) => c.completedDays / Math.max(1, c.duration);
+
+    // Only archived / ended windows: don't suggest named "improve my X challenge" as if ongoing
+    if (activeWindowChallenges.length === 0) {
+      return [
+        'What lessons can I take from my completed challenges?',
+        'What are some tips for building resilience?',
+        'How do I handle setbacks in my journey?',
+      ];
+    }
+
+    const personalQuestions: string[] = [];
+
+    const randomChallenge =
+      activeWindowChallenges[Math.floor(Math.random() * activeWindowChallenges.length)];
+
     if (randomChallenge) {
       personalQuestions.push(`How can I improve my ${randomChallenge.name} challenge?`);
     }
-    
+
+    const hasStartedChallenges = activeWindowChallenges.some((c) => c.completedDays > 0);
+    const hasHighProgressChallenges = activeWindowChallenges.some((c) => ratio(c) >= 0.7);
+    const hasLowProgressChallenges = activeWindowChallenges.some(
+      (c) => c.completedDays > 0 && ratio(c) < 0.3,
+    );
+
     if (hasStartedChallenges) {
-      personalQuestions.push("What should I do when I feel like skipping a day?");
+      personalQuestions.push('What should I do when I feel like skipping a day?');
     }
-    
+
     if (hasHighProgressChallenges) {
-      personalQuestions.push("How can I maintain my progress long-term?");
+      personalQuestions.push('How can I maintain my progress long-term?');
     }
-    
+
     if (hasLowProgressChallenges) {
-      personalQuestions.push("How can I build momentum with my challenges?");
+      personalQuestions.push('How can I build momentum with my challenges?');
     }
-    
-    // Ensure we have at least 3 questions by adding defaults if needed
+
     while (personalQuestions.length < 3) {
       const defaultQuestion = defaultQuestions.shift();
       if (defaultQuestion) {
         personalQuestions.push(defaultQuestion);
       } else {
-        break; // Just in case we run out of default questions
+        break;
       }
     }
-    
-    return personalQuestions;
-  };
 
-  // Create personalized welcome message
-  const getPersonalizedWelcomeMessage = () => {
+    return personalQuestions;
+  }, [userData?.challenges]);
+
+  const getPersonalizedWelcomeMessage = useCallback(() => {
     const greeting = getTimeBasedGreeting();
     const name = userData?.name || 'there';
     
     let welcomeMessage = `${greeting}, ${name}! I'm your personal resilience assistant.`;
     
-    // If user has challenges, add personalized progress info
+    // If user has challenges, add personalized progress info.
+    // "Active" matches Dashboard: calendar window not ended (see `isChallengePastCalendarDuration`).
     if (userData?.challenges && userData.challenges.length > 0) {
       const totalChallenges = userData.challenges.length;
-      const activeChallenges = userData.challenges.filter(c => c.completedDays > 0).length;
-      
-      if (activeChallenges > 0) {
-        welcomeMessage += ` You're working on ${activeChallenges} active ${activeChallenges === 1 ? 'challenge' : 'challenges'}.`;
-        
-        // Find most progressed challenge
-        const mostProgressed = [...userData.challenges].sort((a, b) => 
-          (b.completedDays / b.duration) - (a.completedDays / a.duration)
+      const activeWindowChallenges = userData.challenges.filter(
+        (c) => !isChallengePastCalendarDuration(c),
+      );
+
+      if (activeWindowChallenges.length > 0) {
+        const n = activeWindowChallenges.length;
+        welcomeMessage += ` You're working on ${n} active ${n === 1 ? 'challenge' : 'challenges'}.`;
+
+        const ratio = (c: Challenge) => c.completedDays / Math.max(1, c.duration);
+        const mostProgressed = [...activeWindowChallenges].sort(
+          (a, b) => ratio(b) - ratio(a),
         )[0];
-        
-        if (mostProgressed && (mostProgressed.completedDays / mostProgressed.duration) > 0.5) {
+
+        if (mostProgressed && ratio(mostProgressed) > 0.5) {
           welcomeMessage += ` You're making great progress with your ${mostProgressed.name} challenge!`;
         }
       } else {
-        welcomeMessage += ` You have ${totalChallenges} ${totalChallenges === 1 ? 'challenge' : 'challenges'} set up.`;
+        welcomeMessage += ` You have ${totalChallenges} ${totalChallenges === 1 ? 'challenge' : 'challenges'} in your history.`;
       }
     }
     
     welcomeMessage += ` How can I help you today?`;
     return welcomeMessage;
-  };
+  }, [userData?.name, userData?.challenges]);
 
-  const starterQuestions = useMemo(() => getPersonalizedStarterQuestions(), [userData?.challenges]);
+  const starterQuestions = useMemo(
+    () => getPersonalizedStarterQuestions(),
+    [getPersonalizedStarterQuestions, starterNonce],
+  );
+
+  const showStarterSuggestions =
+    messages.length === 1 &&
+    messages[0]?.sender === 'assistant' &&
+    !isLoading;
 
   useEffect(() => {
-    if (open && messages.length === 0) {
-      // Add welcome message when opened for the first time
-      try {
-        setMessages([
-          {
-            id: Date.now().toString(),
-            content: getPersonalizedWelcomeMessage(),
-            sender: 'assistant',
-            timestamp: new Date()
-          }
-        ]);
-      } catch (error) {
-        console.error("Error setting welcome message:", error);
-        setHasError(true);
-      }
+    if (typeof window === 'undefined' || !userData.uid) return;
+    try {
+      const payload: PersistedChatPayload = {
+        v: CHAT_STORAGE_VERSION,
+        open,
+        messages: messages.map((m) => ({
+          id: m.id,
+          content: m.content,
+          sender: m.sender,
+          timestamp: m.timestamp.toISOString(),
+        })),
+      };
+      window.localStorage.setItem(chatStorageKey(userData.uid), JSON.stringify(payload));
+    } catch (e) {
+      console.warn('[ChatAssistant] Failed to persist chat', e);
     }
-  }, [open, userData?.name, messages.length, userData?.challenges]);
+  }, [open, messages, userData.uid]);
+
+  useEffect(() => {
+    if (!open || messages.length !== 0) return;
+    try {
+      setMessages([
+        {
+          id: createMessageId(),
+          content: getPersonalizedWelcomeMessage(),
+          sender: 'assistant',
+          timestamp: new Date(),
+        },
+      ]);
+      setStarterNonce((n) => n + 1);
+    } catch (error) {
+      console.error('Error setting welcome message:', error);
+      setHasError(true);
+    }
+  }, [open, messages.length, getPersonalizedWelcomeMessage]);
 
   useEffect(() => {
     try {
@@ -239,196 +313,148 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
     }
   }, [messages]);
 
-  // Modify handleSendMessage to use RAG
-  const handleSendMessage = async () => {
-    if (!newMessage.trim()) return;
+  const sendChatMessage = async (text: string) => {
+    const trimmed = text.trim().slice(0, MAX_MESSAGE_LENGTH);
+    if (!trimmed || isLoading) return;
+
+    const conversationHistory = messages.map((m) => ({
+      role: m.sender === 'user' ? ('user' as const) : ('assistant' as const),
+      content: m.content,
+    }));
 
     const userMessage: Message = {
-      id: Date.now().toString(),
-      content: newMessage,
+      id: createMessageId(),
+      content: trimmed,
       sender: 'user',
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    fetchAbortRef.current?.abort();
+    const ac = new AbortController();
+    fetchAbortRef.current = ac;
+    const generation = ++sendGenerationRef.current;
+
+    setMessages((prev) => [...prev, userMessage]);
     setNewMessage('');
     setIsLoading(true);
 
     try {
-      if (!API_KEY) {
-        throw new Error('Gemini API key is not configured.');
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error('session');
       }
-
-      // Get relevant context from Pinecone
-      const relevantContext = await getRelevantContext(newMessage, userData.uid);
-      
-      const today = new Date();
-      const todayKey = getLocalDateKey(today);
-      
-      // Create context from user data
-      const userDataContext = {
-        name: userData?.name || 'User',
-        challenges: (userData?.challenges || []).map(c => {
-          const hasLoggedCurrentPeriod = hasCompletedCurrentNoteSlot(c);
-          return {
-            name: c.name,
-            cadence: getChallengeCadence(c),
-            duration: c.duration,
-            completedDays: c.completedDays,
-            progress: Math.floor((c.completedDays / c.duration) * 100),
-            streak: getLoggedStreakForChallenge(c),
-            hasLoggedCurrentPeriod,
-            lastLoggedDate: c.notes
-              ? Object.keys(c.notes)
-                  .sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
-                  .map((slotStr) => {
-                    const slot = parseInt(slotStr, 10);
-                    if (getChallengeCadence(c) === 'weekly') {
-                      const { end } = getWeeklySlotLocalDateRange(c, slot);
-                      return end.toISOString();
-                    }
-                    const date = new Date(c.startDate);
-                    date.setDate(date.getDate() + slot - 1);
-                    return date.toISOString();
-                  })[0] || null
-              : null,
-          };
-        }),
-        hasReflectionToday: Boolean(userData?.dailyNotes && userData.dailyNotes[todayKey]),
-        todayNote: userData?.dailyNotes && userData.dailyNotes[todayKey] ? userData.dailyNotes[todayKey] : null,
-        timeOfDay: getTimeBasedGreeting().split(' ')[1].toLowerCase(), // morning, afternoon, or evening
-        previousMessages: messages.slice(-4).map(m => ({ role: m.sender, content: m.content })),
-        // Organize notes by recency
-        notes: {
-          today: userData?.dailyNotes && userData.dailyNotes[todayKey] ? {
-            content: userData.dailyNotes[todayKey],
-            dateFormatted: today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-          } : null,
-          // Convert to array of {date, content} objects, sorted by date (recent first, excluding today)
-          previous: userData?.dailyNotes ? 
-            Object.entries(userData.dailyNotes)
-              .filter(([dateKey]) => dateKey !== todayKey)
-              .map(([dateKey, content]) => {
-                const noteDate = new Date(dateKey);
-                return {
-                  content,
-                  dateKey,
-                  dateFormatted: noteDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
-                  daysAgo: Math.floor((today.getTime() - noteDate.getTime()) / (1000 * 60 * 60 * 24))
-                };
-              })
-              .sort((a, b) => a.daysAgo - b.daysAgo) 
-            : [],
-        },
-        challengeNotes: (userData?.challenges || []).reduce((acc: Record<string, unknown>, challenge: Challenge) => {
-          if (challenge.notes) {
-            acc[challenge.id] = challenge.notes;
-          }
-          return acc;
-        }, {}),
-        currentDate: new Date().toISOString(),
-        currentDateFormatted: new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
-        relevantHistory: relevantContext ? relevantContext.matches : [], // Add retrieved context
-      };
-
-      // Modify the prompt to include retrieved context
-      const prompt = `You are a personal resilience coach assistant. The user's name is ${userData?.name || 'there'}. 
-      Today's date is ${new Date().toLocaleDateString()}.
-      
-      Relevant past context:
-      ${(
-        (relevantContext?.matches as unknown as Array<{ content?: unknown; metadata?: { type?: unknown; date?: unknown } }> | undefined) ??
-        []
-      )
-        .map((match) => {
-          const content = typeof match.content === 'string' ? match.content : '';
-          const t = match.metadata?.type;
-          const typeLabel = typeof t === 'string' ? t : 'context';
-          const d = match.metadata?.date;
-          const dateStr = typeof d === 'string' ? d : '';
-          const when = dateStr ? ` (${new Date(dateStr).toLocaleDateString()})` : '';
-          return `- ${typeLabel}: ${content}${when}`;
-        })
-        .join('\n') || 'No relevant past context found.'}
-      
-      Current user data: ${JSON.stringify(userDataContext)}
-      
-      The user said: ${newMessage}
-      
-      Provide a helpful, encouraging, and personalized response that references relevant past experiences and progress when appropriate.
-      Keep your response under 200 words and friendly in tone.`;
-
-      const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(apiUrl('/api/chat-assistant'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
         },
+        credentials: 'include',
+        signal: ac.signal,
         body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: prompt
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 250,
-            topK: 40,
-            topP: 0.95,
-            stopSequences: []
-          }
-        })
+          message: trimmed,
+          conversationHistory,
+        }),
       });
 
-      const data = await response.json();
-      
-      if (data.candidates && data.candidates[0]?.content?.parts) {
-        const plainTextResponse = convertMarkdownToPlainText(data.candidates[0].content.parts[0].text);
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          content: plainTextResponse,
-          sender: 'assistant',
-          timestamp: new Date()
-        };
-        setMessages(prev => [...prev, assistantMessage]);
-      } else {
-        throw new Error('Invalid response format');
+      const rawText = await response.text();
+      let data: { reply?: string; error?: string; detail?: string } = {};
+      if (rawText.trim()) {
+        try {
+          data = JSON.parse(rawText) as typeof data;
+        } catch {
+          throw new Error('bad_response');
+        }
       }
-    } catch (error) {
-      console.error('Error with Gemini API:', error);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: "I'm sorry, I'm having trouble connecting right now. Please try again later.",
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('session');
+        }
+        if (response.status === 404) {
+          throw new Error('profile');
+        }
+        if (response.status === 503) {
+          throw new Error('model');
+        }
+        if (response.status === 500 && data.detail) {
+          console.error('[ChatAssistant] Server error:', data.detail);
+        }
+        throw new Error(data.error || 'request');
+      }
+
+      const replyText = typeof data.reply === 'string' ? data.reply : '';
+      if (!replyText.trim()) {
+        throw new Error('empty');
+      }
+
+      const plainTextResponse = convertMarkdownToPlainText(replyText);
+      const assistantMessage: Message = {
+        id: createMessageId(),
+        content: plainTextResponse,
         sender: 'assistant',
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages((prev) => [...prev, assistantMessage]);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      console.error('Chat assistant error:', error);
+      let fallback =
+        "I'm sorry, I'm having trouble connecting right now. Please try again later.";
+      if (error instanceof Error) {
+        if (error.message === 'session') {
+          fallback = 'Please sign in again to use the assistant.';
+        } else if (error.message === 'profile') {
+          fallback =
+            'Your profile could not be loaded for the assistant. Try refreshing the page or signing in again.';
+        } else if (error.message === 'model') {
+          fallback =
+            'The assistant is temporarily unavailable. Ensure the API server has GEMINI_API_KEY configured.';
+        } else if (error.message === 'bad_response') {
+          fallback =
+            'The assistant server returned an invalid response. Check that the Flask API is running and check the server logs.';
+        }
+      }
+      const errorMessage: Message = {
+        id: createMessageId(),
+        content: fallback,
+        sender: 'assistant',
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     } finally {
-      setIsLoading(false);
+      if (fetchAbortRef.current === ac) {
+        fetchAbortRef.current = null;
+      }
+      if (sendGenerationRef.current === generation) {
+        setIsLoading(false);
+      }
     }
   };
 
+  const handleSendMessage = () => {
+    void sendChatMessage(newMessage);
+  };
+
   const handleStarterQuestionClick = (question: string) => {
-    setNewMessage(question);
-    handleSendMessage();
+    void sendChatMessage(question);
   };
 
   const handleNewChat = () => {
-    setMessages([]);
+    fetchAbortRef.current?.abort();
     setNewMessage('');
-    // Trigger welcome message again
     setMessages([
       {
-        id: Date.now().toString(),
+        id: createMessageId(),
         content: getPersonalizedWelcomeMessage(),
         sender: 'assistant',
-        timestamp: new Date()
-      }
+        timestamp: new Date(),
+      },
     ]);
+    setStarterNonce((n) => n + 1);
   };
 
   const handleCopyMessage = async (content: string) => {
@@ -691,11 +717,11 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
             ))}
             
             {/* Starter Questions */}
-            {messages.length === 1 && (
+            {showStarterSuggestions && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1, width: '100%' }}>
                 {starterQuestions.map((question, index) => (
                   <Button
-                    key={index}
+                    key={`starter-${index}-${question.slice(0, 48)}`}
                     variant="outlined"
                     size="small"
                     onClick={() => handleStarterQuestionClick(question)}
@@ -759,8 +785,11 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
               variant="outlined"
               size="small"
               value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyPress={(e) => {
+              onChange={(e) =>
+                setNewMessage(e.target.value.slice(0, MAX_MESSAGE_LENGTH))
+              }
+              inputProps={{ maxLength: MAX_MESSAGE_LENGTH }}
+              onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSendMessage();
@@ -776,7 +805,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
                       color="text.secondary"
                       sx={{ mr: 1 }}
                     >
-                      {newMessage.length}/200
+                      {newMessage.length}/{MAX_MESSAGE_LENGTH}
                     </Typography>
                   </InputAdornment>
                 ),

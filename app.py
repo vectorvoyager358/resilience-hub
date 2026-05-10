@@ -26,11 +26,13 @@ CORS(app, resources={
 # Import and register blueprints
 from server.routes.pinecone import pinecone_routes
 from server.routes.reminders import reminder_routes
+from server.routes.chat import chat_routes
 
 # Add debug print to see registered routes
 print("Available Routes:")
 app.register_blueprint(pinecone_routes)
 app.register_blueprint(reminder_routes)
+app.register_blueprint(chat_routes)
 for rule in app.url_map.iter_rules():
     print(f"Route: {rule.rule}, Methods: {rule.methods}")
 

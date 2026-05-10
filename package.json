@@ -15,7 +15,8 @@
     "lint": "eslint . --no-eslintrc --config .eslintrc.cjs --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --no-eslintrc --config .eslintrc.cjs --ext ts,tsx --fix",
     "lint:watch": "eslint . --no-eslintrc --config .eslintrc.cjs --ext ts,tsx --watch",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server:dev": ".venv/bin/python app.py"
   },
   "dependencies": {
     "@emotion/react": "^11.11.3",

@@ -6,3 +6,4 @@ pinecone>=6.0,<7
 gunicorn>=22.0,<24
 firebase-admin>=6.5,<7
 google-cloud-firestore>=2.16,<3
+google-generativeai>=0.8,<1

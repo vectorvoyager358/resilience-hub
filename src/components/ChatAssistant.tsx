@@ -304,6 +304,16 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
     }
   }, [open, messages.length, getPersonalizedWelcomeMessage]);
 
+  /** Keep the lone welcome message in sync when challenges/name load or change (Firestore can lag behind dashboard). */
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length !== 1 || prev[0].sender !== 'assistant') return prev;
+      const nextContent = getPersonalizedWelcomeMessage();
+      if (prev[0].content === nextContent) return prev;
+      return [{ ...prev[0], content: nextContent, timestamp: new Date() }];
+    });
+  }, [userData?.name, userData?.challenges, getPersonalizedWelcomeMessage]);
+
   useEffect(() => {
     try {
       // Scroll to bottom of messages

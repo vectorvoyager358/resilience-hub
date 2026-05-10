@@ -1,7 +1,7 @@
 import { embedTextToVector } from './embeddings';
 import { apiUrl } from './apiBase';
+import { authedFetch } from './authFetch';
 
-// Update the type definition to include 'prefix'
 type DeleteFromPineconeParams = {
   userId?: string;
   type?: "challenge" | "note" | "reflection";
@@ -11,34 +11,26 @@ type DeleteFromPineconeParams = {
   prefix?: string;
 };
 
-// Upsert to Pinecone and return vectorId
 export const upsertToPinecone = async (data: {
   userId: string;
   type: 'challenge' | 'note' | 'reflection';
   content: string;
   metadata: Record<string, unknown>;
 }) => {
-  // Generate embedding from content
-  // (Assume embedding is handled elsewhere if using pinecone.ts for upserts)
   const payload = {
-    userId: data.userId,
-    vector: await embedTextToVector(data.content), // If you use Gemini here
+    vector: await embedTextToVector(data.content),
     metadata: {
       ...data.metadata,
       type: data.type,
       content: data.content,
       dayNumber: data.metadata.dayNumber,
       challengeId: data.metadata.challengeId,
-    }
+    },
   };
 
-  const response = await fetch(apiUrl('/api/upsert-pinecone'), {
+  const response = await authedFetch(apiUrl('/api/upsert-pinecone'), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    credentials: 'include',
+    headers: { Accept: 'application/json' },
     body: JSON.stringify(payload),
   });
 
@@ -47,7 +39,6 @@ export const upsertToPinecone = async (data: {
     throw new Error(`Failed to upsert data: ${errorData}`);
   }
 
-  // Return the vectorId so it can be stored in Firestore
   return await response.json();
 };
 
@@ -78,7 +69,6 @@ export async function tryDeleteFromPinecone(params: DeleteFromPineconeParams): P
   }
 }
 
-// Delete from Pinecone using vectorId or prefix
 export const deleteFromPinecone = async (params: DeleteFromPineconeParams) => {
   const requestBody: { vectorId?: string; prefix?: string } = params.vectorId
     ? { vectorId: params.vectorId }
@@ -90,13 +80,9 @@ export const deleteFromPinecone = async (params: DeleteFromPineconeParams) => {
             throw new Error('Must provide vectorId or prefix for deletion');
           })();
 
-  const response = await fetch(apiUrl('/api/delete-pinecone'), {
+  const response = await authedFetch(apiUrl('/api/delete-pinecone'), {
     method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    },
-    credentials: 'include',
+    headers: { Accept: 'application/json' },
     body: JSON.stringify(requestBody),
   });
 
@@ -108,7 +94,6 @@ export const deleteFromPinecone = async (params: DeleteFromPineconeParams) => {
   return await response.json();
 };
 
-// If you have updatePineconeNote, make sure it uses vectorId for deletion
 export const updatePineconeNote = async (data: {
   userId: string;
   type: 'challenge' | 'note' | 'reflection';

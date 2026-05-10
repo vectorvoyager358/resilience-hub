@@ -1,18 +1,26 @@
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+import logging
 import os
 
-# Load environment variables
 load_dotenv()
 
-# Flask app
+# Configure logging once, here. Blueprints must NOT call logging.basicConfig.
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 app = Flask(__name__)
 
-# CORS: comma-separated origins, or omit / empty for "*" (local dev).
-# For GitHub Pages + credentialed fetch, set e.g. ALLOWED_ORIGINS=https://YOU.github.io/resilience-hub,http://localhost:5173
+# CORS: comma-separated origins. When unset we default to localhost dev only —
+# never `*` with `supports_credentials=True`, since Flask-CORS would echo any Origin.
 _allowed_raw = os.environ.get("ALLOWED_ORIGINS", "").strip()
-_cors_origins = [o.strip() for o in _allowed_raw.split(",") if o.strip()] if _allowed_raw else "*"
+if _allowed_raw:
+    _cors_origins = [o.strip() for o in _allowed_raw.split(",") if o.strip()]
+else:
+    _cors_origins = ["http://localhost:5173"]
 
 CORS(app, resources={
     r"/*": {
@@ -23,18 +31,17 @@ CORS(app, resources={
     }
 })
 
-# Import and register blueprints
 from server.routes.pinecone import pinecone_routes
 from server.routes.reminders import reminder_routes
 from server.routes.chat import chat_routes
+from server.routes.embed import embed_routes
+from server.routes.push import push_routes
 
-# Add debug print to see registered routes
-print("Available Routes:")
 app.register_blueprint(pinecone_routes)
 app.register_blueprint(reminder_routes)
 app.register_blueprint(chat_routes)
-for rule in app.url_map.iter_rules():
-    print(f"Route: {rule.rule}, Methods: {rule.methods}")
+app.register_blueprint(embed_routes)
+app.register_blueprint(push_routes)
 
 @app.route('/api/test', methods=['GET'])
 def test_endpoint():

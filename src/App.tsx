@@ -77,16 +77,19 @@ function App() {
 
   useEffect(() => {
     try {
-      // Verify required environment variables
-      const requiredEnvVars = [
-        'VITE_FIREBASE_API_KEY',
-        'VITE_FIREBASE_AUTH_DOMAIN',
-        'VITE_FIREBASE_PROJECT_ID'
-      ];
+      // Verify required environment variables.
+      // Use explicit static access — `import.meta.env[dynamicKey]` would force Vite
+      // to inline the WHOLE env object (including any unrelated VITE_* secrets) into
+      // the public bundle.
+      const requiredEnv: Record<string, string | undefined> = {
+        VITE_FIREBASE_API_KEY: import.meta.env.VITE_FIREBASE_API_KEY,
+        VITE_FIREBASE_AUTH_DOMAIN: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+        VITE_FIREBASE_PROJECT_ID: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      };
 
-      const missingEnvVars = requiredEnvVars.filter(
-        varName => !import.meta.env[varName]
-      );
+      const missingEnvVars = Object.entries(requiredEnv)
+        .filter(([, value]) => !value)
+        .map(([key]) => key);
 
       if (missingEnvVars.length > 0) {
         throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);

@@ -1,6 +1,7 @@
 import { getMessaging, getToken } from 'firebase/messaging';
 import app from './firebase';
-import { upsertUserPushSettings } from './firestore';
+import { apiUrl } from '../utils/apiBase';
+import { authedFetch } from '../utils/authFetch';
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY as string | undefined;
 
@@ -9,9 +10,11 @@ function isSecureContextForPush(): boolean {
 }
 
 /**
- * Best-effort enablement:
- * - stores `users/{uid}.timezone`
- * - stores `users/{uid}.fcmTokens[]` (multi-device)
+ * Register the device's FCM token with the backend.
+ *
+ * The backend validates the token against FCM (dry-run send) and stores it in
+ * `users/{uid}.fcmTokens`. The Firestore client write path for `fcmTokens` is
+ * blocked by rules so the only way to add a token is via this endpoint.
  */
 export async function ensureWebPushEnabled(uid: string): Promise<void> {
   if (!uid) {
@@ -64,6 +67,17 @@ export async function ensureWebPushEnabled(uid: string): Promise<void> {
   }
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  await upsertUserPushSettings(uid, { token, timezone });
-}
 
+  try {
+    const response = await authedFetch(apiUrl('/api/push/register'), {
+      method: 'POST',
+      body: JSON.stringify({ token, timezone }),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      console.warn('[push] register failed:', response.status, detail.slice(0, 200));
+    }
+  } catch (e) {
+    console.error('[push] register request failed:', e);
+  }
+}

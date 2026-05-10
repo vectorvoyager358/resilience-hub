@@ -110,10 +110,18 @@ function createMessageId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
-function getTimeBasedGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
+type GreetingPeriod = 'morning' | 'afternoon' | 'evening';
+
+function getGreetingPeriod(now: Date = new Date()): GreetingPeriod {
+  const hour = now.getHours();
+  if (hour < 12) return 'morning';
+  if (hour < 18) return 'afternoon';
+  return 'evening';
+}
+
+function greetingFromPeriod(period: GreetingPeriod): string {
+  if (period === 'morning') return 'Good morning';
+  if (period === 'afternoon') return 'Good afternoon';
   return 'Good evening';
 }
 
@@ -139,6 +147,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [showCopyNotification, setShowCopyNotification] = useState(false);
+  const [greetingPeriod, setGreetingPeriod] = useState<GreetingPeriod>(() => getGreetingPeriod());
   const [starterNonce, setStarterNonce] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
@@ -151,6 +160,17 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
     },
     [],
   );
+
+  useEffect(() => {
+    const syncGreetingPeriod = () => {
+      const next = getGreetingPeriod();
+      setGreetingPeriod((prev) => (prev === next ? prev : next));
+    };
+
+    syncGreetingPeriod();
+    const timer = window.setInterval(syncGreetingPeriod, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Generate personalized starter questions based on user's challenges
   const getPersonalizedStarterQuestions = useCallback(() => {
@@ -219,7 +239,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   }, [userData?.challenges]);
 
   const getPersonalizedWelcomeMessage = useCallback(() => {
-    const greeting = getTimeBasedGreeting();
+    const greeting = greetingFromPeriod(greetingPeriod);
     const name = userData?.name || 'there';
     
     let welcomeMessage = `${greeting}, ${name}! I'm your personal resilience assistant.`;
@@ -251,7 +271,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
     
     welcomeMessage += ` How can I help you today?`;
     return welcomeMessage;
-  }, [userData?.name, userData?.challenges]);
+  }, [greetingPeriod, userData?.name, userData?.challenges]);
 
   const starterQuestions = useMemo(
     () => getPersonalizedStarterQuestions(),
@@ -308,7 +328,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       if (prev[0].content === nextContent) return prev;
       return [{ ...prev[0], content: nextContent, timestamp: new Date() }];
     });
-  }, [userData?.name, userData?.challenges, getPersonalizedWelcomeMessage]);
+  }, [greetingPeriod, userData?.name, userData?.challenges, getPersonalizedWelcomeMessage]);
 
   useEffect(() => {
     try {

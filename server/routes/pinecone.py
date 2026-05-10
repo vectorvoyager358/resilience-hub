@@ -25,7 +25,7 @@ def validate_request_data(data, required_fields):
     """Validate request data has all required fields"""
     if not data:
         raise ValueError("No JSON data received")
-    
+
     missing_fields = [field for field in required_fields if field not in data]
     if missing_fields:
         raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
@@ -36,32 +36,32 @@ def upsert_to_pinecone():
         logger.info("Received request at /api/upsert-pinecone")
         data = request.json
         logger.info(f"Request data: {data}")
-        
+
         # Validate request data
         validate_request_data(data, ['userId', 'vector', 'metadata'])
-        
+
         user_id = data['userId']
         vector = data['vector']
         metadata = data['metadata']
-        
+
         # Create vector ID
         vector_id = create_vector_id(user_id, metadata)
-        
+
         logger.info(f"Upserting vector for user {user_id} with ID {vector_id}")
-        
+
         # Add user_id to metadata for easier querying
         metadata['user_id'] = user_id
-        
+
         # Upsert to Pinecone
         index.upsert(vectors=[(vector_id, vector, metadata)])
         logger.info(f"Successfully upserted vector {vector_id}")
-        
+
         return jsonify({
             "status": "success",
             "vectorId": vector_id,
             "message": "Vector successfully upserted"
         })
-        
+
     except ValueError as ve:
         logger.error(f"Validation error: {str(ve)}")
         return jsonify({"error": str(ve)}), 400
@@ -132,75 +132,3 @@ def delete_from_pinecone():
     except Exception as e:
         logger.error(f"[PINECONE][DELETE] Error in delete_from_pinecone: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
-@pinecone_routes.route('/api/test-pinecone', methods=['GET'])
-def test_pinecone():
-    try:
-        # Test connection to Pinecone
-        stats = index.describe_index_stats()
-        return jsonify({
-            "status": "success",
-            "message": "Pinecone connection successful",
-            "stats": stats
-        })
-    except Exception as e:
-        logger.error(f"Error testing Pinecone connection: {str(e)}")
-        return jsonify({"error": "Failed to connect to Pinecone"}), 500
-
-
-@pinecone_routes.route('/api/query-pinecone', methods=['POST'])
-def query_pinecone_route():
-    """Semantic search over the user’s vectors (embedding + query); requires Firebase ID token."""
-    from server.firebase_util import verify_bearer_uid
-    from server.gemini_client import embed_query_text
-
-    auth_header = request.headers.get('Authorization')
-    try:
-        uid = verify_bearer_uid(auth_header)
-    except ValueError:
-        return jsonify({"error": "unauthorized", "matches": []}), 401
-    except Exception:
-        return jsonify({"error": "unauthorized", "matches": []}), 401
-
-    data = request.get_json(silent=True) or {}
-    body_uid = data.get('userId')
-    if body_uid != uid:
-        return jsonify({"error": "forbidden", "matches": []}), 403
-
-    query_text = data.get('query')
-    if not isinstance(query_text, str) or not query_text.strip():
-        return jsonify({"error": "query required", "matches": []}), 400
-
-    try:
-        top_k = int(data.get('topK') or 8)
-    except Exception:
-        top_k = 8
-    top_k = max(1, min(top_k, 25))
-
-    try:
-        vec = embed_query_text(query_text.strip())
-        q = index.query(
-            vector=vec,
-            top_k=top_k,
-            include_metadata=True,
-            filter={"user_id": uid},
-        )
-        matches = []
-        for m in q.matches:
-            md_raw = getattr(m, 'metadata', None) or {}
-            md = dict(md_raw) if hasattr(md_raw, 'keys') else {}
-            matches.append({
-                "id": getattr(m, 'id', ''),
-                "score": getattr(m, 'score', None),
-                "content": md.get('content', '') if isinstance(md.get('content'), str) else '',
-                "metadata": {
-                    "type": md.get('type'),
-                    "date": md.get('date') or md.get('dateCreated'),
-                    "challengeId": md.get('challengeId'),
-                    "dayNumber": md.get('dayNumber'),
-                },
-            })
-        return jsonify({"matches": matches})
-    except Exception as e:
-        logger.error(f"query_pinecone: {str(e)}", exc_info=True)
-        return jsonify({"matches": [], "error": "query_failed"}), 200

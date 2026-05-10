@@ -916,7 +916,7 @@ const NotesHistoryPage: React.FC = () => {
 
       {/* Add the ChatAssistant component */}
       <ErrorBoundary>
-        <ChatAssistant userData={userData} />
+        <ChatAssistant key={userData.uid} userData={userData} />
       </ErrorBoundary>
     </Container>
   );

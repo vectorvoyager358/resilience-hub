@@ -3077,7 +3077,7 @@ const DashboardPage: React.FC = () => {
       
       {/* Wrap ChatAssistant in ErrorBoundary */}
       <ErrorBoundary>
-        <ChatAssistant userData={userData} />
+        <ChatAssistant key={userData.uid} userData={userData} />
       </ErrorBoundary>
 
       

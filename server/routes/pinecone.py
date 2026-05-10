@@ -10,9 +10,6 @@ logger = logging.getLogger(__name__)
 
 pinecone_routes = Blueprint('pinecone', __name__)
 
-# RAG / Chat assistant: client calls POST /api/query-pinecone (see ChatAssistant.getRelevantContext);
-# that route is not registered here yet—implement query + embedding + index.query with user filter.
-
 # Create a Pinecone client instance
 pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
 index = pc.Index(os.getenv('PINECONE_INDEX_NAME'))
@@ -149,3 +146,61 @@ def test_pinecone():
     except Exception as e:
         logger.error(f"Error testing Pinecone connection: {str(e)}")
         return jsonify({"error": "Failed to connect to Pinecone"}), 500
+
+
+@pinecone_routes.route('/api/query-pinecone', methods=['POST'])
+def query_pinecone_route():
+    """Semantic search over the user’s vectors (embedding + query); requires Firebase ID token."""
+    from server.firebase_util import verify_bearer_uid
+    from server.gemini_client import embed_query_text
+
+    auth_header = request.headers.get('Authorization')
+    try:
+        uid = verify_bearer_uid(auth_header)
+    except ValueError:
+        return jsonify({"error": "unauthorized", "matches": []}), 401
+    except Exception:
+        return jsonify({"error": "unauthorized", "matches": []}), 401
+
+    data = request.get_json(silent=True) or {}
+    body_uid = data.get('userId')
+    if body_uid != uid:
+        return jsonify({"error": "forbidden", "matches": []}), 403
+
+    query_text = data.get('query')
+    if not isinstance(query_text, str) or not query_text.strip():
+        return jsonify({"error": "query required", "matches": []}), 400
+
+    try:
+        top_k = int(data.get('topK') or 8)
+    except Exception:
+        top_k = 8
+    top_k = max(1, min(top_k, 25))
+
+    try:
+        vec = embed_query_text(query_text.strip())
+        q = index.query(
+            vector=vec,
+            top_k=top_k,
+            include_metadata=True,
+            filter={"user_id": uid},
+        )
+        matches = []
+        for m in q.matches:
+            md_raw = getattr(m, 'metadata', None) or {}
+            md = dict(md_raw) if hasattr(md_raw, 'keys') else {}
+            matches.append({
+                "id": getattr(m, 'id', ''),
+                "score": getattr(m, 'score', None),
+                "content": md.get('content', '') if isinstance(md.get('content'), str) else '',
+                "metadata": {
+                    "type": md.get('type'),
+                    "date": md.get('date') or md.get('dateCreated'),
+                    "challengeId": md.get('challengeId'),
+                    "dayNumber": md.get('dayNumber'),
+                },
+            })
+        return jsonify({"matches": matches})
+    except Exception as e:
+        logger.error(f"query_pinecone: {str(e)}", exc_info=True)
+        return jsonify({"matches": [], "error": "query_failed"}), 200

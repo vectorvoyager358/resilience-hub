@@ -308,7 +308,6 @@ const ProfilePage: React.FC = () => {
               }}
             >
               <Avatar
-                src={currentUser?.photoURL || undefined}
                 alt=""
                 sx={{
                   width: 88,
@@ -321,7 +320,7 @@ const ProfilePage: React.FC = () => {
                   borderColor: 'background.paper',
                 }}
               >
-                {!currentUser?.photoURL ? profileInitials : null}
+                {profileInitials}
               </Avatar>
             </Box>
 

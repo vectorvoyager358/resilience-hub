@@ -2,7 +2,6 @@ import {
   doc, 
   setDoc, 
   updateDoc, 
-  arrayUnion,
   // deleteDoc,
   // collection,
   // getDocs,
@@ -84,27 +83,6 @@ export const updateUserData = async (uid: string, data: Partial<User>) => {
     });
   } catch (error) {
     console.error('Error updating user data:', error);
-    throw error;
-  }
-};
-
-export const upsertUserPushSettings = async (
-  uid: string,
-  data: { token: string; timezone: string }
-) => {
-  try {
-    await setDoc(
-      doc(db, 'users', uid),
-      ({
-        timezone: data.timezone,
-        fcmTokens: arrayUnion(data.token),
-        fcmTokenUpdatedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }) satisfies Record<string, unknown>,
-      { merge: true }
-    );
-  } catch (error) {
-    console.error('Error updating push settings:', error);
     throw error;
   }
 };

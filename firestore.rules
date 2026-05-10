@@ -1,12 +1,67 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // User document rules
+
+    // -----------------------------------------------------------------------
+    // /users/{userId}
+    //
+    // Owner-only access. Writes are constrained to a known field allowlist so
+    // that:
+    //   * Push tokens (`fcmTokens`) and reminder bookkeeping are server-only
+    //     (registered via POST /api/push/register, which validates the token
+    //     against FCM before storing).
+    //   * The reminders cron's bookkeeping fields cannot be tampered with by
+    //     end users to suppress or trigger notifications.
+    //   * Data shape stays predictable for the chat assistant + cron job.
+    // -----------------------------------------------------------------------
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId;
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      // Fields a signed-in owner is allowed to write directly.
+      function clientWritableFields() {
+        return [
+          'uid',
+          'name',
+          'email',
+          'timezone',
+          'timezoneUpdatedAt',
+          'pushRemindersEnabled',
+          'challenges',
+          'dailyNotes',
+          'createdAt',
+          'updatedAt'
+        ];
+      }
+
+      function writesOnlyAllowedFields() {
+        return request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly(clientWritableFields());
+      }
+
+      function createOnlyAllowedFields() {
+        return request.resource.data.keys().hasOnly(clientWritableFields());
+      }
+
+      function uidFieldMatches() {
+        // If `uid` is present in the doc, it must equal the auth uid.
+        return !('uid' in request.resource.data)
+               || request.resource.data.uid == userId;
+      }
+
+      allow read: if isOwner();
+
+      allow create: if isOwner()
+                    && createOnlyAllowedFields()
+                    && uidFieldMatches();
+
+      allow update: if isOwner()
+                    && writesOnlyAllowedFields()
+                    && uidFieldMatches();
+
+      allow delete: if isOwner();
     }
   }
-} 
+}

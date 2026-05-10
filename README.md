@@ -43,7 +43,7 @@ Copy the example file and fill in real values:
 cp .env.example .env
 ```
 
-At minimum, set the **Firebase** `VITE_*` variables so auth and Firestore work. For the chat assistant and client-side embeddings, set **`VITE_GEMINI_API_KEY`**. Do not commit `.env`.
+At minimum, set the **Firebase** `VITE_*` variables so auth and Firestore work. The chat assistant and embeddings run server-side, so set **`GEMINI_API_KEY`** in the backend env (see "Backend" below) — never expose the Gemini key in any `VITE_*` variable. Do not commit `.env`.
 
 ### 3. Run the Vite dev server
 
@@ -98,7 +98,6 @@ VITE_FIREBASE_PROJECT_ID=
 VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
-VITE_GEMINI_API_KEY=
 VITE_API_BASE_URL=
 VITE_BASE_PATH=
 ```
@@ -112,8 +111,16 @@ VITE_BASE_PATH=
 ```env
 PINECONE_API_KEY=
 PINECONE_INDEX_NAME=
+# Used by /api/embed and /api/chat-assistant. Server-side only; never add a `VITE_` prefix to this.
+GEMINI_API_KEY=
 # Optional: restrict CORS in production (comma-separated). Required for credentialed browser requests from a real origin (e.g. GitHub Pages).
+# When unset, defaults to http://localhost:5173 (dev only) — set this for any non-local deploy.
 # ALLOWED_ORIGINS=https://YOURNAME.github.io/resilience-hub,http://localhost:5173
+# Optional: tune the per-uid token buckets used by /api/upsert-pinecone, /api/delete-pinecone, /api/embed, /api/push/register.
+# PINECONE_RATE_CAPACITY=30
+# PINECONE_RATE_REFILL_PER_SEC=5
+# EMBED_RATE_CAPACITY=60
+# EMBED_RATE_REFILL_PER_SEC=5
 ```
 
 Never commit secrets; use `.env.example` as the template only.
@@ -172,7 +179,7 @@ Static hosting uses [**GitHub Actions**](.github/workflows/deploy-pages.yml): bu
 
 1. **Settings → Pages → Build and deployment** — set **Source** to **GitHub Actions**.
 2. **Settings → Secrets and variables → Actions**
-   - **Secrets**: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_GEMINI_API_KEY`.
+   - **Secrets**: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_FIREBASE_VAPID_KEY`. (`GEMINI_API_KEY` lives only on the Flask backend — never add it as a `VITE_*` build secret, since `VITE_*` values are inlined into the public JS bundle.)
    - **Variables**: `VITE_API_BASE_URL` = Cloud Run service URL (no trailing slash).
 3. **Cloud Run**: set **`ALLOWED_ORIGINS`** to `https://YOUR_USER.github.io,https://YOUR_USER.github.io/YOUR_REPO,http://localhost:5173` (adjust user/repo).
 4. **Firebase → Authentication → Authorized domains**: add **`github.io`**.

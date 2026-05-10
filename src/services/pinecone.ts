@@ -1,6 +1,7 @@
 import { Challenge, Note } from '../types';
 import { getChallengeCadence } from '../utils/challengeProgress';
 import { apiUrl } from '../utils/apiBase';
+import { authedFetch } from '../utils/authFetch';
 import { embedTextToVector } from '../utils/embeddings';
 
 /** Pinecone mirror only — failures must not block Firestore or UI */
@@ -9,12 +10,8 @@ async function postUpsertPinecone(body: object): Promise<{
   data: Record<string, unknown>;
 } | { ok: false }> {
   try {
-    const response = await fetch(apiUrl('/api/upsert-pinecone'), {
+    const response = await authedFetch(apiUrl('/api/upsert-pinecone'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
       body: JSON.stringify(body),
     });
     const text = await response.text();
@@ -34,14 +31,13 @@ async function postUpsertPinecone(body: object): Promise<{
   }
 }
 
-export async function upsertChallengeData(userId: string, challenge: Challenge): Promise<void> {
+export async function upsertChallengeData(_userId: string, challenge: Challenge): Promise<void> {
   try {
     const cadence = getChallengeCadence(challenge);
     const unit = cadence === 'weekly' ? 'weeks' : 'days';
     const summary = `Challenge: ${challenge.name} (${cadence}). Progress: ${challenge.completedDays}/${challenge.duration} ${unit}.`;
     const vector = await embedTextToVector(summary);
     const res = await postUpsertPinecone({
-      userId,
       vector,
       metadata: {
         type: 'challenge',
@@ -59,7 +55,7 @@ export async function upsertChallengeData(userId: string, challenge: Challenge):
 }
 
 export async function upsertNoteData(
-  userId: string,
+  _userId: string,
   challengeId: string,
   dayNumber: number,
   note: string | Note
@@ -69,7 +65,6 @@ export async function upsertNoteData(
     const vector = await embedTextToVector(noteContent);
 
     const res = await postUpsertPinecone({
-      userId,
       vector,
       metadata: {
         type: 'note',
@@ -90,14 +85,13 @@ export async function upsertNoteData(
 }
 
 export async function upsertDailyReflection(
-  userId: string,
+  _userId: string,
   date: string,
   reflection: string
 ): Promise<void> {
   try {
     const vector = await embedTextToVector(reflection);
     const res = await postUpsertPinecone({
-      userId,
       vector,
       metadata: {
         type: 'reflection',

@@ -125,6 +125,17 @@ function greetingFromPeriod(period: GreetingPeriod): string {
   return 'Good evening';
 }
 
+function pickRandomUnique(choices: string[], count: number): string[] {
+  const pool = [...choices];
+  const picked: string[] = [];
+  while (pool.length > 0 && picked.length < count) {
+    const idx = Math.floor(Math.random() * pool.length);
+    const [item] = pool.splice(idx, 1);
+    if (item) picked.push(item);
+  }
+  return picked;
+}
+
 const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   const [open, setOpen] = useState(() => loadPersistedChat(userData.uid)?.open ?? false);
   const [messages, setMessages] = useState<Message[]>(
@@ -178,6 +189,38 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       'How can I stay motivated during my challenge?',
       'What are some tips for building resilience?',
       'How do I handle setbacks in my journey?',
+      'What is one tiny action I can take today?',
+      'How can I recover quickly after missing a day?',
+      'How do I build a routine that actually sticks?',
+      'What should I focus on this week to make progress?',
+    ];
+
+    const startedChallengePrompts = [
+      'What should I do when I feel like skipping a day?',
+      'How can I stay consistent when motivation drops?',
+      'What should I do if I miss one day without losing momentum?',
+      'How can I get back on track after a rough week?',
+    ];
+
+    const highProgressPrompts = [
+      'How can I maintain my progress long-term?',
+      'How do I avoid burnout while doing well?',
+      'What can I do to lock in this momentum?',
+      'How can I level up from here without overdoing it?',
+    ];
+
+    const lowProgressPrompts = [
+      'How can I build momentum with my challenges?',
+      'How do I restart when progress has been slow?',
+      'What is the easiest way to regain consistency?',
+      'How can I make this challenge feel less overwhelming?',
+    ];
+
+    const completedOnlyPrompts = [
+      'What lessons can I take from my completed challenges?',
+      'How can I turn completed challenge wins into lasting habits?',
+      'What challenge should I start next based on my past progress?',
+      'How can I reflect on what worked best for me?',
     ];
 
     if (!userData?.challenges || userData.challenges.length === 0) {
@@ -192,11 +235,12 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
 
     // Only archived / ended windows: don't suggest named "improve my X challenge" as if ongoing
     if (activeWindowChallenges.length === 0) {
-      return [
-        'What lessons can I take from my completed challenges?',
-        'What are some tips for building resilience?',
-        'How do I handle setbacks in my journey?',
-      ];
+      const starters = pickRandomUnique(completedOnlyPrompts, 2);
+      const fallback = pickRandomUnique(
+        defaultQuestions.filter((q) => !starters.includes(q)),
+        3 - starters.length,
+      );
+      return [...starters, ...fallback];
     }
 
     const personalQuestions: string[] = [];
@@ -215,24 +259,25 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
     );
 
     if (hasStartedChallenges) {
-      personalQuestions.push('What should I do when I feel like skipping a day?');
+      const startedPick = pickRandomUnique(startedChallengePrompts, 1)[0];
+      if (startedPick) personalQuestions.push(startedPick);
     }
 
     if (hasHighProgressChallenges) {
-      personalQuestions.push('How can I maintain my progress long-term?');
+      const highPick = pickRandomUnique(highProgressPrompts, 1)[0];
+      if (highPick) personalQuestions.push(highPick);
     }
 
     if (hasLowProgressChallenges) {
-      personalQuestions.push('How can I build momentum with my challenges?');
+      const lowPick = pickRandomUnique(lowProgressPrompts, 1)[0];
+      if (lowPick) personalQuestions.push(lowPick);
     }
 
     while (personalQuestions.length < 3) {
-      const defaultQuestion = defaultQuestions.shift();
-      if (defaultQuestion) {
-        personalQuestions.push(defaultQuestion);
-      } else {
-        break;
-      }
+      const candidates = defaultQuestions.filter((q) => !personalQuestions.includes(q));
+      const next = pickRandomUnique(candidates, 1)[0];
+      if (!next) break;
+      personalQuestions.push(next);
     }
 
     return personalQuestions;

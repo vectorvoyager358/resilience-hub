@@ -32,5 +32,4 @@ export interface User {
 
 export interface ChatAssistantProps {
   userData: User;
-} 
-
+}

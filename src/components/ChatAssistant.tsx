@@ -25,7 +25,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SearchIcon from '@mui/icons-material/Search';
-import type { Challenge, User } from '../types';
+import type { Challenge, ChatAssistantProps, User } from '../types';
 import { isChallengePastCalendarDuration } from '../utils/challengeProgress';
 import { apiUrl } from '../utils/apiBase';
 import { auth } from '../services/firebase';
@@ -99,10 +99,6 @@ const convertMarkdownToPlainText = (markdown: string): string => {
     .replace(/\n\s*\d+\.\s/g, '\n') // Numbered lists
     .trim();
 };
-
-interface ChatAssistantProps {
-  userData: User;
-}
 
 /** Matches server `/api/chat-assistant` safety limits; keeps prompts bounded. */
 const MAX_MESSAGE_LENGTH = 2000;

@@ -1,7 +1,6 @@
 import { getMessaging, getToken } from 'firebase/messaging';
+import { authedPost } from '../api/http';
 import app from './firebase';
-import { apiUrl } from '../utils/apiBase';
-import { authedFetch } from '../utils/authFetch';
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY as string | undefined;
 
@@ -69,10 +68,7 @@ export async function ensureWebPushEnabled(uid: string): Promise<void> {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   try {
-    const response = await authedFetch(apiUrl('/api/push/register'), {
-      method: 'POST',
-      body: JSON.stringify({ token, timezone }),
-    });
+    const response = await authedPost('/api/push/register', { token, timezone });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       console.warn('[push] register failed:', response.status, detail.slice(0, 200));

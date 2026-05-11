@@ -20,9 +20,6 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
-  "exclude": [
-    "**/*.test.*",
-    "**/*.spec.*"
-  ]
+  "include": ["src", "tests/frontend"],
+  "exclude": ["node_modules", "dist"]
 } 

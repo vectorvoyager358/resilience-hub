@@ -2,11 +2,11 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { render, screen } from '@testing-library/react';
-import PublicRoute from './PublicRoute';
+import PublicRoute from '../../../src/components/PublicRoute';
 
 const mockUseAuth = vi.fn();
 
-vi.mock('../contexts/AuthContext', () => ({
+vi.mock('../../../src/contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
@@ -106,4 +106,3 @@ describe('PublicRoute', () => {
     expect(screen.getByText('register-form')).toBeInTheDocument();
   });
 });
-

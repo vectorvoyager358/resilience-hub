@@ -16,14 +16,14 @@ vi.mock('react-router-dom', async () => {
 
 const loginMock = vi.fn();
 const resetPasswordMock = vi.fn();
-vi.mock('../contexts/AuthContext', () => ({
+vi.mock('../../../src/contexts/AuthContext', () => ({
   useAuth: () => ({
     login: loginMock,
     resetPassword: resetPasswordMock,
   }),
 }));
 
-import LoginPage from './LoginPage';
+import LoginPage from '../../../src/pages/LoginPage';
 
 describe('LoginPage', () => {
   it('navigates to /dashboard after successful login', async () => {
@@ -45,4 +45,3 @@ describe('LoginPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/dashboard', { replace: true });
   });
 });
-

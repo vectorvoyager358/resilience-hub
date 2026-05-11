@@ -25,7 +25,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SearchIcon from '@mui/icons-material/Search';
-import type { Challenge, ChatAssistantProps, User } from '../types';
+import type { Challenge, ChatAssistantProps } from '../types';
 import { isChallengePastCalendarDuration } from '../utils/challengeProgress';
 import { apiUrl } from '../utils/apiBase';
 import { auth } from '../services/firebase';

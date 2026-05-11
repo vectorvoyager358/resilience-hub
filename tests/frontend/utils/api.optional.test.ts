@@ -4,13 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 // `authedFetch` only reads `auth.currentUser`; null is fine — it throws
 // "not signed in", which the optional helpers swallow into the same
 // "skip and continue" behavior we're asserting on.
-vi.mock('../services/firebase', () => ({
+vi.mock('../../../src/services/firebase', () => ({
   auth: { currentUser: null },
   db: {},
 }));
 
 // Avoid calling real embedding providers in tests.
-vi.mock('./embeddings', () => ({
+vi.mock('../../../src/utils/embeddings', () => ({
   embedTextToVector: vi.fn(async () => new Array(3).fill(0.01)),
 }));
 
@@ -21,7 +21,7 @@ describe('Pinecone optional helpers', () => {
     });
     (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
 
-    const mod = await import('./api');
+    const mod = await import('../../../src/utils/api');
     const vectorId = await mod.tryUpsertToPinecone({
       userId: 'u1',
       type: 'note',
@@ -38,7 +38,7 @@ describe('Pinecone optional helpers', () => {
     });
     (globalThis as unknown as { fetch: unknown }).fetch = fetchMock;
 
-    const mod = await import('./api');
+    const mod = await import('../../../src/utils/api');
     await expect(mod.tryDeleteFromPinecone({ vectorId: 'vid-1' })).resolves.toBeUndefined();
   });
 });

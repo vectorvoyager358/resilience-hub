@@ -6,14 +6,14 @@ import { MemoryRouter } from 'react-router-dom';
 
 // --- Mocks ---
 const mockUseAuth = vi.fn();
-vi.mock('../contexts/AuthContext', () => ({
+vi.mock('../../../src/contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
 const updateChallengesMock = vi.fn();
 const updateDailyNotesMock = vi.fn();
 const ensureUserDocumentShellMock = vi.fn();
-vi.mock('../services/firestore', () => ({
+vi.mock('../../../src/services/firestore', () => ({
   getUserData: vi.fn(),
   updateChallenges: (...args: unknown[]) => updateChallengesMock(...args),
   updateDailyNotes: (...args: unknown[]) => updateDailyNotesMock(...args),
@@ -23,7 +23,7 @@ vi.mock('../services/firestore', () => ({
 
 const upsertChallengeDataMock = vi.fn();
 const upsertDailyReflectionMock = vi.fn();
-vi.mock('../services/pinecone', () => ({
+vi.mock('../../../src/services/pinecone', () => ({
   upsertChallengeData: (...args: unknown[]) => upsertChallengeDataMock(...args),
   upsertNoteData: vi.fn(),
   upsertDailyReflection: (...args: unknown[]) => upsertDailyReflectionMock(...args),
@@ -31,16 +31,16 @@ vi.mock('../services/pinecone', () => ({
 
 const tryUpsertToPineconeMock = vi.fn();
 const updatePineconeNoteMock = vi.fn();
-vi.mock('../utils/api', () => ({
+vi.mock('../../../src/utils/api', () => ({
   tryUpsertToPinecone: (...args: unknown[]) => tryUpsertToPineconeMock(...args),
   tryDeleteFromPinecone: vi.fn(),
   deleteFromPinecone: vi.fn(),
   updatePineconeNote: (...args: unknown[]) => updatePineconeNoteMock(...args),
 }));
 
-vi.mock('../components/TypingAnimation', () => ({ default: () => null }));
-vi.mock('../components/ChatAssistant', () => ({ default: () => null }));
-vi.mock('./NotesHistoryPage', () => ({ default: () => null }));
+vi.mock('../../../src/components/TypingAnimation', () => ({ default: () => null }));
+vi.mock('../../../src/components/ChatAssistant', () => ({ default: () => null }));
+vi.mock('../../../src/pages/NotesHistoryPage', () => ({ default: () => null }));
 vi.mock('@mui/material/useMediaQuery', () => ({ default: () => false }));
 
 const onSnapshotMock = vi.fn();
@@ -63,12 +63,12 @@ let firestoreSnap = {
   payload: defaultUserPayload(),
 };
 
-vi.mock('../services/firebase', () => ({
+vi.mock('../../../src/services/firebase', () => ({
   db: {},
   auth: { currentUser: { uid: 'u1', displayName: 'Test User' } },
 }));
 
-import DashboardPage from './DashboardPage';
+import DashboardPage from '../../../src/pages/DashboardPage';
 
 function renderDashboard() {
   return render(
@@ -303,4 +303,3 @@ describe('DashboardPage (feature regression)', () => {
     expect(updateDailyNotesMock).toHaveBeenCalledWith('u1', {});
   });
 });
-

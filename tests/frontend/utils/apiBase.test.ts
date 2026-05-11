@@ -15,7 +15,7 @@ describe('apiUrl', () => {
   it('returns same-origin path when base is empty', async () => {
     vi.resetModules();
     await withInjectedBase('', async () => {
-      const mod = await import('./apiBase');
+      const mod = await import('../../../src/utils/apiBase');
       expect(mod.apiUrl('/api/test')).toBe('/api/test');
     });
   });
@@ -23,7 +23,7 @@ describe('apiUrl', () => {
   it('prefixes base URL and trims trailing slash', async () => {
     vi.resetModules();
     await withInjectedBase('https://example.run.app/', async () => {
-      const mod = await import('./apiBase');
+      const mod = await import('../../../src/utils/apiBase');
       expect(mod.apiUrl('/api/test')).toBe('https://example.run.app/api/test');
     });
   });
@@ -31,9 +31,8 @@ describe('apiUrl', () => {
   it('adds leading slash to path when missing', async () => {
     vi.resetModules();
     await withInjectedBase('https://example.run.app', async () => {
-      const mod = await import('./apiBase');
+      const mod = await import('../../../src/utils/apiBase');
       expect(mod.apiUrl('api/test')).toBe('https://example.run.app/api/test');
     });
   });
 });
-

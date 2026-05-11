@@ -278,10 +278,8 @@ describe('DashboardPage (feature regression)', () => {
 
     renderDashboard();
 
-    // Open floating menu (Fab has MenuIcon inside)
-    const menuFab = (await screen.findByTestId('MenuIcon')).closest('button');
-    expect(menuFab).toBeTruthy();
-    await userEvent.click(menuFab!);
+    const menuFab = await screen.findByTestId('dashboard-menu-fab');
+    await userEvent.click(menuFab);
 
     await userEvent.click(await screen.findByText('Reset All Challenges'));
 
@@ -295,9 +293,8 @@ describe('DashboardPage (feature regression)', () => {
 
     renderDashboard();
 
-    const menuFab = (await screen.findByTestId('MenuIcon')).closest('button');
-    expect(menuFab).toBeTruthy();
-    await userEvent.click(menuFab!);
+    const menuFab = await screen.findByTestId('dashboard-menu-fab');
+    await userEvent.click(menuFab);
 
     await userEvent.click(await screen.findByText('Delete All Daily Reflection Notes'));
 

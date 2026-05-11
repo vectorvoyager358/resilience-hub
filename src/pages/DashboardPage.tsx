@@ -64,15 +64,16 @@ import ShowerIcon from '@mui/icons-material/Shower';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import LogoutIcon from '@mui/icons-material/Logout';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
-import MenuIcon from '@mui/icons-material/Menu';
 import DirectionsWalkIcon from '@mui/icons-material/DirectionsWalk';
 import LocalDrinkIcon from '@mui/icons-material/LocalDrink';
 import HotelIcon from '@mui/icons-material/Hotel';
 import EmojiObjectsIcon from '@mui/icons-material/EmojiObjects';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
+import MenuIcon from '@mui/icons-material/Menu';
 import { Challenge, User } from '../types';
 import TypingAnimation from '../components/TypingAnimation';
 import ChatAssistant from '../components/ChatAssistant';
+import { livelyMenuFabSx } from '../styles/livelyMenuFab';
 import { useAuth } from '../contexts/AuthContext';
 import { updateChallenges, updateDailyNotes, ensureUserDocumentShell } from '../services/firestore';
 import useMediaQuery from '@mui/material/useMediaQuery';
@@ -102,6 +103,9 @@ import {
   formatCadenceLabel,
   type ChallengeCadence,
 } from '../utils/challengeProgress';
+
+/** On menu FAB hover, one letter at a time cycles (C → h → a → …), 1s per letter. */
+const CHALLENGE_MENU_WORD = 'Challenge';
 
 const DAILY_DURATION_MIN = 10;
 const DAILY_DURATION_MAX = 365;
@@ -515,6 +519,18 @@ const DashboardPage: React.FC = () => {
   );
   const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuFabHovered, setMenuFabHovered] = useState(false);
+  /** Index into `CHALLENGE_MENU_WORD` while FAB is hovered (single visible letter). */
+  const [menuFabLetterIndex, setMenuFabLetterIndex] = useState(0);
+
+  useEffect(() => {
+    if (!menuFabHovered) return;
+    const word = CHALLENGE_MENU_WORD;
+    const id = window.setInterval(() => {
+      setMenuFabLetterIndex((i) => (i + 1) % word.length);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [menuFabHovered]);
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [selectedChallengeForNote, setSelectedChallengeForNote] = useState<Challenge | null>(null);
   const [scrolled, setScrolled] = useState(false);
@@ -3059,18 +3075,39 @@ const DashboardPage: React.FC = () => {
         
         <Fab
           color="primary"
+          data-testid="dashboard-menu-fab"
+          aria-label="Open menu"
           onClick={() => setMenuOpen(!menuOpen)}
+          onMouseEnter={() => {
+            setMenuFabHovered(true);
+            setMenuFabLetterIndex(0);
+          }}
+          onMouseLeave={() => setMenuFabHovered(false)}
           sx={{
             width: 56,
             height: 56,
-            background: 'linear-gradient(135deg, #2ec4b6, #2a9d8f)',
-            '&:hover': {
-              background: 'linear-gradient(135deg, #2a9d8f, #2ec4b6)'
-            },
-            boxShadow: '0 4px 20px rgba(46, 196, 182, 0.3)',
+            ...livelyMenuFabSx,
           }}
         >
-          <MenuIcon />
+          {menuFabHovered ? (
+            <Typography
+              className="menu-fab-letter"
+              component="span"
+              aria-hidden
+              sx={{
+                color: 'common.white',
+                fontWeight: 800,
+                lineHeight: 1,
+                fontSize: '1.35rem',
+                textAlign: 'center',
+                userSelect: 'none',
+              }}
+            >
+              {CHALLENGE_MENU_WORD.charAt(menuFabLetterIndex)}
+            </Typography>
+          ) : (
+            <MenuIcon />
+          )}
         </Fab>
       </Box>
       </ClickAwayListener>

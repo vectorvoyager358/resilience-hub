@@ -29,6 +29,7 @@ import type { Challenge, ChatAssistantProps, User } from '../types';
 import { isChallengePastCalendarDuration } from '../utils/challengeProgress';
 import { apiUrl } from '../utils/apiBase';
 import { auth } from '../services/firebase';
+import { livelyMenuFabSx } from '../styles/livelyMenuFab';
 
 interface Message {
   id: string;
@@ -556,10 +557,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
           color="primary"
           aria-label="chat"
           onClick={() => window.location.reload()}
-          sx={{
-            background: 'linear-gradient(45deg, #3a86ff 30%, #8338ec 90%)',
-            boxShadow: '0 6px 15px rgba(58, 134, 255, 0.3)',
-          }}
+          sx={livelyMenuFabSx}
         >
           <ChatIcon />
         </Fab>
@@ -576,10 +574,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
             color="primary"
             aria-label="chat"
             onClick={() => setOpen(true)}
-            sx={{
-              background: 'linear-gradient(45deg, #3a86ff 30%, #8338ec 90%)',
-              boxShadow: '0 6px 15px rgba(58, 134, 255, 0.3)',
-            }}
+            sx={livelyMenuFabSx}
           >
             <ChatIcon />
           </Fab>

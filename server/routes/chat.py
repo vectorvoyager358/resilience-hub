@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, List
 
 from flask import Blueprint, jsonify, request
@@ -11,9 +12,10 @@ from google.cloud import firestore
 
 from server.assistant_facts import build_assistant_facts
 from server.chat_context import prompt_context_json
-from server.firebase_util import init_firebase_admin, verify_bearer_uid
+from server.firebase_util import init_firebase_admin, verify_bearer_uid_and_email_verified
 from server.gemini_client import generate_chat_reply
 from server.intent_chat import needs_semantic_retrieval
+from server.rate_limit import TokenBucketLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,38 @@ chat_routes = Blueprint("chat", __name__)
 MAX_USER_MESSAGE_CHARS = 4000
 MAX_HISTORY_TURNS = 14
 MAX_HISTORY_CONTENT_CHARS = 8000
+
+# Per-UID/IP token buckets to cap Gemini/Pinecone usage.
+_UID_RATE_CAPACITY = int(os.environ.get("CHAT_UID_RATE_CAPACITY", "3"))
+_UID_RATE_REFILL = float(os.environ.get("CHAT_UID_RATE_REFILL_PER_SEC", "0.5"))
+_IP_RATE_CAPACITY = int(os.environ.get("CHAT_IP_RATE_CAPACITY", "10"))
+_IP_RATE_REFILL = float(os.environ.get("CHAT_IP_RATE_REFILL_PER_SEC", "1"))
+
+_uid_limiter = TokenBucketLimiter(capacity=_UID_RATE_CAPACITY, refill_per_second=_UID_RATE_REFILL)
+_ip_limiter = TokenBucketLimiter(capacity=_IP_RATE_CAPACITY, refill_per_second=_IP_RATE_REFILL)
+
+
+def _client_ip() -> str:
+    # Trust X-Forwarded-For only when it’s present; otherwise fall back to the
+    # socket peer address.
+    xff = request.headers.get("X-Forwarded-For", "").strip()
+    if xff:
+        first = xff.split(",", 1)[0].strip()
+        if first:
+            return first
+    if request.remote_addr:
+        return request.remote_addr
+    return "unknown"
+
+
+def _check_rate(uid: str, ip: str) -> tuple[Dict[str, Any], int] | None:
+    if not _uid_limiter.allow(uid, cost=1.0):
+        return {"error": "rate_limited"}, 429
+    # Also cap by IP to reduce abuse from account-creation/spam.
+    ip_key = ip or "unknown"
+    if not _ip_limiter.allow(ip_key, cost=1.0):
+        return {"error": "rate_limited"}, 429
+    return None
 
 
 def _sanitize_chat_payload(message: str, history_raw: object) -> tuple[str, List[Dict[str, str]]]:
@@ -149,12 +183,15 @@ def chat_assistant():
     try:
         auth_header = request.headers.get("Authorization")
         try:
-            uid = verify_bearer_uid(auth_header)
+            uid, email_verified = verify_bearer_uid_and_email_verified(auth_header)
         except ValueError:
             return jsonify({"error": "unauthorized"}), 401
         except Exception as e:
             logger.warning("Auth verify failed: %s", e)
             return jsonify({"error": "unauthorized"}), 401
+
+        if not email_verified:
+            return jsonify({"error": "email_not_verified"}), 403
 
         payload = request.get_json(silent=True) or {}
         raw_message = payload.get("message")
@@ -164,6 +201,12 @@ def chat_assistant():
         message, history = _sanitize_chat_payload(raw_message, payload.get("conversationHistory"))
         if not message:
             return jsonify({"error": "message required"}), 400
+
+        ip = _client_ip()
+        rate_err = _check_rate(uid, ip)
+        if rate_err is not None:
+            body, code = rate_err
+            return jsonify(body), code
 
         init_firebase_admin()
         db = firestore.Client()

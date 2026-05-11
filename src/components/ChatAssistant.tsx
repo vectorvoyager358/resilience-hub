@@ -443,6 +443,9 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
         if (response.status === 401) {
           throw new Error('session');
         }
+        if (response.status === 403) {
+          throw new Error('email_not_verified');
+        }
         if (response.status === 404) {
           throw new Error('profile');
         }
@@ -478,6 +481,8 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       if (error instanceof Error) {
         if (error.message === 'session') {
           fallback = 'Please sign in again to use the assistant.';
+        } else if (error.message === 'email_not_verified') {
+          fallback = 'Please verify your email to use the assistant.';
         } else if (error.message === 'profile') {
           fallback =
             'Your profile could not be loaded for the assistant. Try refreshing the page or signing in again.';

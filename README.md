@@ -116,11 +116,17 @@ GEMINI_API_KEY=
 # Optional: restrict CORS in production (comma-separated). Required for credentialed browser requests from a real origin (e.g. GitHub Pages).
 # When unset, defaults to http://localhost:5173 (dev only) — set this for any non-local deploy.
 # ALLOWED_ORIGINS=https://YOURNAME.github.io/resilience-hub,http://localhost:5173
-# Optional: tune the per-uid token buckets used by /api/upsert-pinecone, /api/delete-pinecone, /api/embed, /api/push/register.
+# Optional: tune token buckets used by expensive endpoints:
+# - /api/upsert-pinecone, /api/delete-pinecone, /api/embed, /api/push/register
+# - /api/chat-assistant (Gemini + optional Pinecone RAG)
 # PINECONE_RATE_CAPACITY=30
 # PINECONE_RATE_REFILL_PER_SEC=5
 # EMBED_RATE_CAPACITY=60
 # EMBED_RATE_REFILL_PER_SEC=5
+# CHAT_UID_RATE_CAPACITY=3
+# CHAT_UID_RATE_REFILL_PER_SEC=0.5
+# CHAT_IP_RATE_CAPACITY=10
+# CHAT_IP_RATE_REFILL_PER_SEC=1
 ```
 
 Never commit secrets; use `.env.example` as the template only.

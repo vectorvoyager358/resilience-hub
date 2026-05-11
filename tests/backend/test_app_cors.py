@@ -28,7 +28,7 @@ class CorsPreflightTest(unittest.TestCase):
     def setUpClass(cls):
         fake_pinecone_module = types.SimpleNamespace(Pinecone=_FakePinecone)
         with patch.dict(sys.modules, {"pinecone": fake_pinecone_module}):
-            cls.app_module = importlib.import_module("app")
+            cls.app_module = importlib.import_module("server.app")
         cls.client = cls.app_module.app.test_client()
 
     def test_chat_preflight_allows_authorization_header(self):

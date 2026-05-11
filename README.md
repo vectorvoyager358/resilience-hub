@@ -21,8 +21,8 @@ The experience is aimed at **solo use**: your data is scoped to your Firebase ac
 |------|------------|
 | Frontend | React 18, TypeScript, Vite, MUI, React Router, Framer Motion |
 | Auth & data | Firebase Authentication, Cloud Firestore |
-| AI | Google Generative AI (Gemini) for chat and text embeddings |
-| Vector store API | Flask + `pinecone` (`app.py`, `server/routes/`) |
+| AI | [Google Gen AI SDK](https://ai.google.dev/gemini-api/docs/migrate) (`google-genai`, Gemini) for chat and text embeddings |
+| Vector store API | Flask + `pinecone` (`server/app.py`, `server/routes/`) |
 | Charts | Chart.js / react-chartjs-2 |
 
 ## Local setup
@@ -63,18 +63,20 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Create or extend a **`.env`** file in the project root (same file as the frontend or a dedicated backend env—`app.py` uses `python-dotenv`) with:
+Create or extend a **`.env`** file in the project root (same file as the frontend or a dedicated backend env—`server/app.py` loads it via `python-dotenv`) with:
 
 ```env
 PINECONE_API_KEY=
 PINECONE_INDEX_NAME=
 ```
 
-Then start the server:
+Then start the server (from the **repository root** so the `server` package resolves):
 
 ```bash
-python app.py
+python -m server.app
 ```
+
+Or use `npm run server:dev` if you use the repo’s `.venv` path.
 
 Health check: open `http://localhost:5001/api/test` or the root URL for a simple status message.
 
@@ -86,6 +88,12 @@ Health check: open `http://localhost:5001/api/test` or the root URL for a simple
 - `npm run lint` — ESLint
 - `npm run lint:fix` — ESLint with auto-fix
 - `npm run lint:watch` — ESLint in watch mode
+- `npm run server:dev` — Flask API (`python -m server.app` via `.venv`)
+- `npm test` / `npm run test:run` — Vitest unit tests (`tests/frontend/`)
+- `npm run test:server` — Flask/Python `unittest` (`tests/backend/`; uses `.venv/bin/python` like `server:dev`, from repo root)
+- `npm run e2e` — Playwright smoke tests (`tests/e2e/`)
+
+Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backend` (Python), `tests/e2e` (Playwright).
 
 ## Environment variables reference
 
@@ -137,7 +145,7 @@ The app can be hosted as static files (e.g. **`dist/`** after `npm run build`). 
 
 ### Google Cloud Run (Flask API)
 
-The repo includes a **`Dockerfile`** that builds only the Python API (`app.py` + `server/`). Below is what **you** need on your side, then a typical deploy flow.
+The repo includes a **`Dockerfile`** that builds only the Python API (`server/`, entry `server.app:app`). Below is what **you** need on your side, then a typical deploy flow.
 
 #### What you need
 

@@ -1,6 +1,5 @@
+import { authedPostJsonOrThrow } from '../api/http';
 import { embedTextToVector } from './embeddings';
-import { apiUrl } from './apiBase';
-import { authedFetch } from './authFetch';
 
 type DeleteFromPineconeParams = {
   userId?: string;
@@ -28,18 +27,12 @@ export const upsertToPinecone = async (data: {
     },
   };
 
-  const response = await authedFetch(apiUrl('/api/upsert-pinecone'), {
-    method: 'POST',
-    headers: { Accept: 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.text();
-    throw new Error(`Failed to upsert data: ${errorData}`);
+  try {
+    return await authedPostJsonOrThrow<Record<string, unknown>>('/api/upsert-pinecone', payload);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`Failed to upsert data: ${msg}`);
   }
-
-  return await response.json();
 };
 
 /** Upsert without throwing — use when Pinecone/RAG is optional and Firestore is source of truth. */
@@ -80,18 +73,12 @@ export const deleteFromPinecone = async (params: DeleteFromPineconeParams) => {
             throw new Error('Must provide vectorId or prefix for deletion');
           })();
 
-  const response = await authedFetch(apiUrl('/api/delete-pinecone'), {
-    method: 'POST',
-    headers: { Accept: 'application/json' },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.text();
-    throw new Error(`Failed to delete data: ${errorData}`);
+  try {
+    return await authedPostJsonOrThrow<Record<string, unknown>>('/api/delete-pinecone', requestBody);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`Failed to delete data: ${msg}`);
   }
-
-  return await response.json();
 };
 
 export const updatePineconeNote = async (data: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Challenge } from '../types';
+import type { Challenge } from '../../../src/types';
 import {
   getChallengeCalendarDayIndex,
   getChallengeNoteSlotIndex,
@@ -8,7 +8,7 @@ import {
   isChallengePastCalendarDuration,
   getWeeklySlotLocalDateRange,
   syncChallengeCompletedDays,
-} from './challengeProgress';
+} from '../../../src/utils/challengeProgress';
 
 function atLocalDate(y: number, m: number, d: number): Date {
   return new Date(y, m - 1, d, 12, 0, 0, 0);

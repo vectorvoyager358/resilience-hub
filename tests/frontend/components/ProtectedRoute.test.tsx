@@ -2,11 +2,11 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { render, screen } from '@testing-library/react';
-import ProtectedRoute from './ProtectedRoute';
+import ProtectedRoute from '../../../src/components/ProtectedRoute';
 
 const mockUseAuth = vi.fn();
 
-vi.mock('../contexts/AuthContext', () => ({
+vi.mock('../../../src/contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
@@ -89,4 +89,3 @@ describe('ProtectedRoute', () => {
     expect(screen.getByText('dashboard')).toBeInTheDocument();
   });
 });
-

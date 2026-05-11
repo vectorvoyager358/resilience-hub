@@ -1,34 +1,18 @@
+import { authedPostJsonOptional } from '../api/http';
 import { Challenge, Note } from '../types';
 import { getChallengeCadence } from '../utils/challengeProgress';
-import { apiUrl } from '../utils/apiBase';
-import { authedFetch } from '../utils/authFetch';
 import { embedTextToVector } from '../utils/embeddings';
 
 /** Pinecone mirror only — failures must not block Firestore or UI */
-async function postUpsertPinecone(body: object): Promise<{
-  ok: true;
-  data: Record<string, unknown>;
-} | { ok: false }> {
-  try {
-    const response = await authedFetch(apiUrl('/api/upsert-pinecone'), {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      console.warn('[Pinecone] upsert HTTP', response.status, text.slice(0, 280));
-      return { ok: false };
-    }
-    try {
-      return { ok: true, data: JSON.parse(text) as Record<string, unknown> };
-    } catch {
-      console.warn('[Pinecone] upsert response was not JSON');
-      return { ok: false };
-    }
-  } catch (e) {
-    console.warn('[Pinecone] upsert request failed:', e);
+async function postUpsertPinecone(body: object): Promise<
+  { ok: true; data: Record<string, unknown> } | { ok: false }
+> {
+  const res = await authedPostJsonOptional<Record<string, unknown>>('/api/upsert-pinecone', body);
+  if (!res.ok) {
+    console.warn('[Pinecone] upsert HTTP', res.status, res.detail.slice(0, 280));
     return { ok: false };
   }
+  return { ok: true, data: res.data };
 }
 
 export async function upsertChallengeData(_userId: string, challenge: Challenge): Promise<void> {

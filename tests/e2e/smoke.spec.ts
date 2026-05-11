@@ -15,4 +15,3 @@ test('unauthenticated dashboard route redirects to login (or home)', async ({ pa
   await expect(page).toHaveURL(/\/(login)?$/);
   await expect(page.getByRole('heading', { name: /resilience hub/i })).toBeVisible();
 });
-

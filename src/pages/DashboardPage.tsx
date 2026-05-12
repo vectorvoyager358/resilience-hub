@@ -1277,7 +1277,7 @@ const DashboardPage: React.FC = () => {
       await updateChallenges(currentUser.uid, updatedChallenges);
       
       // Update Pinecone
-      await updatePineconeNote({
+      const pineconeResult = await updatePineconeNote({
         userId: currentUser.uid,
         type: 'note',
         id: `${editTodayChallengeId}_day${slotNumber}`,
@@ -1291,8 +1291,27 @@ const DashboardPage: React.FC = () => {
         }
       });
 
+      let finalChallenges = updatedChallenges;
+      const nextVectorId = pineconeResult?.vectorId;
+      if (nextVectorId && nextVectorId !== prevVectorId) {
+        finalChallenges = updatedChallenges.map(c => {
+          if (c.id !== editTodayChallengeId) return c;
+          return syncChallengeCompletedDays({
+            ...c,
+            notes: {
+              ...(c.notes as Record<string, Note>),
+              [`${slotNumber}`]: {
+                content: editTodayNote.trim(),
+                vectorId: nextVectorId,
+              },
+            },
+          });
+        });
+        await updateChallenges(currentUser.uid, finalChallenges);
+      }
+
       // Update local state
-      setUserData(prev => ({ ...prev, challenges: updatedChallenges }));
+      setUserData(prev => ({ ...prev, challenges: finalChallenges }));
       
       setEditTodayNoteDialogOpen(false);
       setEditTodayChallengeId(null);

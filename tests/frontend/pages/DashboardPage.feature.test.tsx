@@ -223,7 +223,7 @@ describe('DashboardPage (feature regression)', () => {
     );
   });
 
-  it("edits today's note and calls updatePineconeNote", async () => {
+  it("edits today's note and persists the replacement Pinecone vector id", async () => {
     const startDate = new Date().toISOString();
     firestoreSnap = {
       exists: true,
@@ -270,6 +270,15 @@ describe('DashboardPage (feature regression)', () => {
         content: 'New note',
         oldVectorId: 'vid-1',
       })
+    );
+    expect(updateChallengesMock).toHaveBeenCalledTimes(2);
+    const lastCall = updateChallengesMock.mock.calls[updateChallengesMock.mock.calls.length - 1];
+    const finalChallenges = lastCall[1] as Array<{ notes: Record<string, { content: string; vectorId?: string }> }>;
+    expect(finalChallenges[0].notes['1']).toEqual(
+      expect.objectContaining({
+        content: 'New note',
+        vectorId: 'vid-2',
+      }),
     );
   });
 

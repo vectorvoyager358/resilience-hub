@@ -12,7 +12,7 @@ The experience is aimed at **solo use**: your data is scoped to your Firebase ac
 - **Challenges**: Create timed challenges, track progress by day, archive completed ones, milestones and gentle progress feedback.
 - **Journaling**: Daily and per-challenge notes, editing, search (including fuzzy search via Fuse.js), and a dedicated notes history area.
 - **Assistant chat**: Personalized greetings and suggested prompts based on your active challenges; uses Gemini for conversation.
-- **RAG-style context**: Embeddings (Gemini on the client) can be sent to a small Flask API that **upserts** and **deletes** vectors in Pinecone so the assistant can retrieve relevant snippets of your notes and challenge text. Core tracking still works in **Firestore** if the backend or Pinecone is unavailable.
+- **RAG-style context**: The browser calls **`POST /api/embed`** (server-side Gemini; the API key never ships to the client), then authenticated **`/api/upsert-pinecone`** / **`/api/delete-pinecone`** keep Pinecone in sync so the assistant can retrieve snippets of your notes and challenge text. Core tracking still works in **Firestore** if the backend or Pinecone is unavailable.
 - **Progressive Web App**: Configured via `vite-plugin-pwa` with app manifest and icons.
 
 ## Tech stack
@@ -95,6 +95,8 @@ Health check: open `http://localhost:5001/api/test` or the root URL for a simple
 
 Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backend` (Python), `tests/e2e` (Playwright).
 
+More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/push-reminders.md`).
+
 ## Environment variables reference
 
 **Frontend (Vite — `VITE_*` is exposed to the browser):**
@@ -120,6 +122,7 @@ VITE_BASE_PATH=
 PINECONE_API_KEY=
 PINECONE_INDEX_NAME=
 # Used by /api/embed and /api/chat-assistant. Server-side only; never add a `VITE_` prefix to this.
+# The server also accepts GOOGLE_API_KEY as a fallback name (see server/gemini_client.py).
 GEMINI_API_KEY=
 # Optional: restrict CORS in production (comma-separated). Required for credentialed browser requests from a real origin (e.g. GitHub Pages).
 # When unset, defaults to http://localhost:5173 (dev only) — set this for any non-local deploy.
@@ -156,7 +159,7 @@ The repo includes a **`Dockerfile`** that builds only the Python API (`server/`,
    - `gcloud config set project YOUR_PROJECT_ID`
 4. **Secrets for the service**
    - **`PINECONE_API_KEY`** and **`PINECONE_INDEX_NAME`** (same values you use locally). Prefer [Secret Manager](https://cloud.google.com/secret-manager) for the API key; at minimum set them as Cloud Run env vars in the console or via `--set-env-vars` (avoid logging them).
-5. **CORS**: The browser sends **cookies/credentials** with some `/api` calls. That **does not work** with `Access-Control-Allow-Origin: *`. Set **`ALLOWED_ORIGINS`** on the service to your real site origins, comma-separated, e.g. `https://YOURNAME.github.io`, `https://YOURNAME.github.io/resilience-hub`, and `http://localhost:5173` for local testing.
+5. **CORS**: Most `/api` calls use **`Authorization: Bearer`** (Firebase ID token), not cookies. The Flask app still uses **`supports_credentials: True`** in CORS, so **`ALLOWED_ORIGINS`** must be an explicit origin list (not `*`) in production. Set it to your real site origins, comma-separated, e.g. `https://YOURNAME.github.io`, `https://YOURNAME.github.io/resilience-hub`, and `http://localhost:5173` for local testing.
 6. **Frontend URL**: Set **`VITE_API_BASE_URL`** in the static build to your Cloud Run origin (no trailing slash). The app uses it for all `/api/...` calls when not same-origin.
 
 #### Deploy from your machine (source build)

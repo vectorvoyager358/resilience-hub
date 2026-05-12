@@ -58,6 +58,52 @@ def _check_rate(uid: str, ip: str) -> tuple[Dict[str, Any], int] | None:
     return None
 
 
+def _env_truthy(key: str) -> bool:
+    return (os.environ.get(key) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _log_built_prompt(
+    *,
+    uid: str,
+    prompt: str,
+    user_message: str,
+    context_json: str,
+    rag_block: str,
+    history_lines: str,
+    use_rag: bool,
+    match_count: int,
+    history_turns: int,
+) -> None:
+    """Observability for prompt assembly. Full text may contain PII — use DEBUG or opt-in INFO."""
+    plen = len(prompt)
+    logger.info(
+        "chat_assistant prompt_build uid=%s total_chars=%d user_msg_chars=%d "
+        "context_json_chars=%d rag_block_chars=%d history_chars=%d "
+        "history_turns=%d rag_requested=%s rag_match_count=%d",
+        uid,
+        plen,
+        len(user_message),
+        len(context_json),
+        len(rag_block),
+        len(history_lines),
+        history_turns,
+        use_rag,
+        match_count,
+    )
+    preview_n = int(os.environ.get("CHAT_LOG_PROMPT_PREVIEW_CHARS", "0") or "0")
+    if preview_n > 0:
+        logger.info(
+            "chat_assistant prompt_preview (first %d of %d chars):\n%s",
+            min(preview_n, plen),
+            plen,
+            prompt[:preview_n],
+        )
+    if _env_truthy("CHAT_LOG_FULL_PROMPT"):
+        logger.info("chat_assistant full_prompt:\n%s", prompt)
+    else:
+        logger.debug("chat_assistant full_prompt (%d chars):\n%s", plen, prompt)
+
+
 def _sanitize_chat_payload(message: str, history_raw: object) -> tuple[str, List[Dict[str, str]]]:
     msg = message.strip()[:MAX_USER_MESSAGE_CHARS]
     history: List[Dict[str, str]] = []
@@ -232,6 +278,18 @@ def chat_assistant():
             rag_block=rag_block,
             history_lines=history_lines,
             user_message=message,
+        )
+
+        _log_built_prompt(
+            uid=uid,
+            prompt=prompt,
+            user_message=message,
+            context_json=context_json,
+            rag_block=rag_block,
+            history_lines=history_lines,
+            use_rag=use_rag,
+            match_count=len(matches),
+            history_turns=len(history),
         )
 
         try:

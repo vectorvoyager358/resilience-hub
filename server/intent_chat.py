@@ -23,7 +23,9 @@ _MEMORY = re.compile(
     r"when\s+did\s+i|summarize\s+(my|the)|remember\s+(when|what|if)|"
     r"wrote\s+about|reflections?\s+about|my\s+(notes|journal)|"
     r"notes\s+about|last\s+time\s+i|past\s+(week|month)|"
-    r"feel\s+about|themes?\s+in"
+    r"feel\s+about|themes?\s+in|"
+    r"how\s+much\b|"
+    r"(yesterday|today)\b"
     r")\b",
     re.I,
 )
@@ -33,8 +35,9 @@ def needs_semantic_retrieval(message: str) -> bool:
     m = (message or "").strip()
     if not m:
         return False
-    if _FACT_PRIMARY.search(m) and not _MEMORY.search(m):
-        return False
+    # Prefer memory-style routing when both memory and aggregate-fact patterns match.
     if _MEMORY.search(m):
         return True
+    if _FACT_PRIMARY.search(m):
+        return False
     return False

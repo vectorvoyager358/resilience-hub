@@ -46,9 +46,39 @@ A **React (Vite) client** is included mainly as a shell to authenticate, edit ch
 
 ## RAG and backend architecture
 
-1. **Indexing path**: The client obtains text embeddings (Gemini embedding model) and POSTs to the Flask **`/api/embed`** and **`/api/upsert-pinecone`** flows so vectors land in a **per-user** Pinecone namespace; deletes go through **`/api/delete-pinecone`** when content is removed.
-2. **Chat path**: **`/api/chat-assistant`** (see `server/routes/chat.py`) verifies the Firebase bearer token, builds **structured context** from Firestore (`server/assistant_facts.py`), and when **`needs_semantic_retrieval`** says the question needs note-level grounding, runs a **Pinecone query** (`_pinecone_matches_for_user`) to pull top-k chunks. That retrieved text is merged into the prompt; **Gemini** generates the reply (`server/gemini_client.py`).
+Backend RAG at a glance: **indexing** (embed → upsert/delete in Pinecone) and **chat** (auth → Firestore facts → optional retrieval → one prompt → Gemini).
+
+```mermaid
+flowchart TB
+  subgraph Indexing["Indexing path — vector writes"]
+    U1["Challenge / note text from client"]
+    U1 --> E1["POST /api/embed"]
+    E1 --> G1["Gemini embedding model\nserver-side only"]
+    G1 --> U2["POST /api/upsert-pinecone"]
+    U2 --> PC["Pinecone index\nvectors scoped per user"]
+    U3["POST /api/delete-pinecone"]
+    U3 --> PC
+  end
+
+  subgraph Chatpath["Chat path — retrieval + generation"]
+    CA["POST /api/chat-assistant\nAuthorization: Firebase ID token"]
+    CA --> V["Verify token + email / rate limits"]
+    V --> FS["Firestore users/{uid}\nassistant_facts → prompt context"]
+    FS --> R{"needs_semantic_retrieval\nintent_chat.py"}
+    R -->|yes| EM["Embed user message\nGemini"]
+    EM --> PQ["Pinecone query\ntop-K, user_id filter"]
+    PQ --> PR["_build_system_prompt\nrules + facts + RAG block + history"]
+    R -->|no| PR
+    PR --> GM["generate_chat_reply\ngemini_client.py"]
+    GM --> OUT["JSON: assistant reply + meta\nragRequested, usedRag, …"]
+  end
+```
+
+1. **Indexing path**: The client sends text to Flask **`/api/embed`** (Gemini embeddings on the server), then **`/api/upsert-pinecone`** so vectors land in a **per-user** Pinecone namespace; **`/api/delete-pinecone`** removes vectors when content is deleted.
+2. **Chat path**: **`/api/chat-assistant`** (`server/routes/chat.py`) verifies the Firebase bearer token, builds **structured context** from Firestore (`server/assistant_facts.py`), and when **`needs_semantic_retrieval`** says the question needs note-level grounding, runs **embed + Pinecone query** (`_pinecone_matches_for_user`) for top-k chunks. Retrieved text is merged into the prompt; **Gemini** generates the reply (`server/gemini_client.py`).
 3. **Safety and ops**: **Token-bucket rate limits** protect Pinecone, embed, and chat routes; **CORS** is origin-locked for credentialed browser calls; **`GEMINI_API_KEY`** and **`PINECONE_API_KEY`** never ship in frontend env vars.
+
+For a fuller step-by-step (prompt layers, RAG vs no-RAG), see [`docs/chat-assistant-flow.md`](docs/chat-assistant-flow.md).
 
 If Pinecone or the API is down, **Firestore-backed tracking** in the client can still operate; **RAG enrichment** is the optional upgrade path.
 

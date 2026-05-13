@@ -1,6 +1,6 @@
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -79,7 +79,10 @@ function renderDashboard() {
 }
 
 beforeEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
+  localStorage.clear();
+  sessionStorage.clear();
   updateChallengesMock.mockReset();
   updateDailyNotesMock.mockReset();
   ensureUserDocumentShellMock.mockReset().mockResolvedValue(undefined);
@@ -121,6 +124,10 @@ beforeEach(() => {
 
   tryUpsertToPineconeMock.mockResolvedValue(undefined);
   updatePineconeNoteMock.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('DashboardPage (feature regression)', () => {
@@ -182,6 +189,44 @@ describe('DashboardPage (feature regression)', () => {
       expect.any(String),
       'Felt good. Stayed consistent.'
     );
+  });
+
+  it('uses the refreshed local date when deleting a daily reflection after the date changes', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date('2026-05-12T12:00:00'));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    firestoreSnap = {
+      exists: true,
+      payload: {
+        uid: 'u1',
+        name: 'Test User',
+        challenges: [],
+        dailyNotes: {
+          '2026-05-12': 'Yesterday reflection',
+          '2026-05-13': 'Today reflection',
+        },
+      },
+    };
+    updateDailyNotesMock.mockResolvedValue(undefined);
+
+    renderDashboard();
+
+    expect(await screen.findByText('Yesterday reflection')).toBeInTheDocument();
+
+    vi.setSystemTime(new Date('2026-05-13T12:00:00'));
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(await screen.findByText('Today reflection')).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText(/delete reflection/i));
+    await user.click(await screen.findByRole('button', { name: /^delete$/i }));
+
+    expect(updateDailyNotesMock).toHaveBeenCalledWith('u1', {
+      '2026-05-12': 'Yesterday reflection',
+    });
   });
 
   it('marks today complete by saving a challenge note and persisting via updateChallenges', async () => {

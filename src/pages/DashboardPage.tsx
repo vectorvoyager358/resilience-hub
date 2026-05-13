@@ -563,11 +563,8 @@ const DashboardPage: React.FC = () => {
   const [isFirstVisit, setIsFirstVisit] = useState(() => {
     return !localStorage.getItem('hasVisitedDashboard');
   });
-  const [lastKnownDate, setLastKnownDate] = useState<string>(localStorage.getItem('lastKnownDate') || getLocalDateKey());
-  const today = useMemo(() => {
-    const now = new Date();
-    return getLocalDateKey(now);
-  }, []);
+  const [lastKnownDate, setLastKnownDate] = useState<string>(() => getLocalDateKey());
+  const today = lastKnownDate;
 
   const activeChallenges = useMemo(
     () => userData.challenges.filter((c) => !isChallengePastCalendarDuration(c)),
@@ -745,14 +742,18 @@ const DashboardPage: React.FC = () => {
 
   // Function to get formatted date string
   const getFormattedDate = useCallback(() => {
-    const now = new Date();
-    return now.toLocaleDateString(undefined, { 
+    const [year, month, day] = today.split('-').map(Number);
+    const displayDate =
+      Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)
+        ? new Date(year, month - 1, day)
+        : new Date();
+    return displayDate.toLocaleDateString(undefined, { 
       weekday: 'long',
       month: 'long', 
       day: 'numeric',
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     });
-  }, []);
+  }, [today]);
 
   useEffect(() => {
     if (!currentUser?.uid) {
@@ -1139,7 +1140,7 @@ const DashboardPage: React.FC = () => {
 
   const handleDailyNoteSubmit = async () => {
     if (!currentUser) return;
-    const todayKey = getLocalDateKey();
+    const todayKey = today;
     const updatedDailyNotes = {
       ...userData.dailyNotes,
       [todayKey]: dailyNote
@@ -1235,7 +1236,7 @@ const DashboardPage: React.FC = () => {
 
   const handleDeleteDailyNote = async () => {
     if (!currentUser) return;
-    const todayKey = getLocalDateKey();
+    const todayKey = today;
     const updatedDailyNotes = { ...userData.dailyNotes };
     delete updatedDailyNotes[todayKey];
 

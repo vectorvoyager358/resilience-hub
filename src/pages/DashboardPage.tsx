@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useId } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -106,6 +106,9 @@ import {
 
 /** On menu FAB hover, one letter at a time cycles (C → h → a → …), 1s per letter. */
 const CHALLENGE_MENU_WORD = 'Challenge';
+
+const WELCOME_HEADLINE_GRADIENT =
+  'linear-gradient(90deg, #2ec4b6 0%, #34c9b8 18%, #42c4ae 34%, #55b88e 46%, #9ead3a 54%, #e0a010 68%, #f49418 82%, #ff9f1c 100%)';
 
 const DAILY_DURATION_MIN = 10;
 const DAILY_DURATION_MAX = 365;
@@ -459,6 +462,7 @@ function getChallengeIcon(challengeName: string) {
 
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
+  const headerFireGradientId = useId().replace(/:/g, '');
   const { currentUser, logout } = useAuth();
   const [userData, setUserData] = useState<User>({ 
     uid: currentUser?.uid || '', 
@@ -1508,24 +1512,89 @@ const DashboardPage: React.FC = () => {
               <Box>
                 {/* Header - Simplified without action buttons */}
                 <Grid container spacing={2} alignItems="center">
-                  {/* Avatar and Welcome message */}
                   <Grid item xs={12}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Avatar 
-                        sx={{ 
-                          bgcolor: '#2ec4b6', 
-                          width: 40, 
-                          height: 40,
-                          boxShadow: '0 4px 10px rgba(46, 196, 182, 0.3)'
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 48,
+                          height: 48,
+                          flexShrink: 0,
+                          position: 'relative',
+                          '@keyframes dashboardFireFlicker': {
+                            '0%, 100%': {
+                              filter: 'brightness(1) saturate(1.06)',
+                            },
+                            '28%': {
+                              filter: 'brightness(1.1) saturate(1.18)',
+                            },
+                            '48%': {
+                              filter: 'brightness(0.97) saturate(1.02)',
+                            },
+                            '68%': {
+                              filter: 'brightness(1.06) saturate(1.12)',
+                            },
+                          },
+                          animation: 'dashboardFireFlicker 2.4s ease-in-out infinite',
                         }}
                       >
-                        <LocalFireDepartmentIcon />
-                      </Avatar>
+                        {/* Gradient defs: background-clip:text does not paint MUI SvgIcon paths in Chrome. */}
+                        <Box
+                          component="svg"
+                          width={1}
+                          height={1}
+                          sx={{
+                            position: 'absolute',
+                            left: -9999,
+                            top: 0,
+                            overflow: 'hidden',
+                            pointerEvents: 'none',
+                          }}
+                          aria-hidden
+                        >
+                          <defs>
+                            <linearGradient
+                              id={headerFireGradientId}
+                              gradientUnits="userSpaceOnUse"
+                              x1={12}
+                              y1={20.25}
+                              x2={12}
+                              y2={2.1}
+                            >
+                              <stop offset="0%" stopColor="#2aa698" />
+                              <stop offset="12%" stopColor="#2ec4b6" />
+                              <stop offset="28%" stopColor="#3ed0bb" />
+                              <stop offset="42%" stopColor="#4fb8a0" />
+                              <stop offset="54%" stopColor="#9aaa38" />
+                              <stop offset="66%" stopColor="#e09a16" />
+                              <stop offset="78%" stopColor="#ff9f1c" />
+                              <stop offset="90%" stopColor="#ffb03d" />
+                              <stop offset="97%" stopColor="#ffdca0" />
+                              <stop offset="100%" stopColor="#fff6ea" />
+                            </linearGradient>
+                          </defs>
+                        </Box>
+                        <LocalFireDepartmentIcon
+                          aria-hidden
+                          sx={{
+                            fontSize: 44,
+                            display: 'block',
+                            color: 'transparent',
+                            '& path': {
+                              fill: `url(#${headerFireGradientId})`,
+                            },
+                            filter:
+                              'drop-shadow(0 2px 4px rgba(42, 143, 132, 0.2)) drop-shadow(0 -2px 10px rgba(255, 200, 140, 0.45)) drop-shadow(0 0 14px rgba(255, 159, 28, 0.2))',
+                          }}
+                        />
+                      </Box>
                       {!isFirstVisit ? (
                         <Typography variant="h5" component="h1" 
                           sx={{ 
                             fontWeight: 700,
-                            background: 'linear-gradient(90deg, #2ec4b6, #ff9f1c)',
+                            background: WELCOME_HEADLINE_GRADIENT,
                             backgroundClip: 'text',
                             textFillColor: 'transparent',
                             WebkitBackgroundClip: 'text',
@@ -1542,7 +1611,7 @@ const DashboardPage: React.FC = () => {
                             fontWeight: 700,
                             fontSize: { xs: '1.5rem', sm: '1.75rem', md: '2rem' },
                             m: 0,
-                            background: 'linear-gradient(90deg, #2ec4b6, #ff9f1c)',
+                            background: WELCOME_HEADLINE_GRADIENT,
                             backgroundClip: 'text',
                             textFillColor: 'transparent',
                             WebkitBackgroundClip: 'text',

@@ -1,61 +1,87 @@
-# Resilience Hub
+<div align="center">
 
-## What this app is
+<img src="public/icon-512x512.png" alt="Resilience Hub logo" width="140" height="140" />
 
-**Resilience Hub** is a web app for tracking personal **resilience challenges**—habits or goals you commit to for a set number of days—and reflecting on your progress over time. You sign in, define challenges with a duration, log completed days on a calendar-style view, attach notes to days or challenges, and browse history. A **built-in chat assistant** (powered by Google Gemini) can answer in context of your journey; **vector search** (Pinecone) keeps challenge and note text synced so replies can draw on what you have actually written.
+# RESILIENCE HUB
 
-The experience is aimed at **solo use**: your data is scoped to your Firebase account. The UI is a single-page React app (Material UI) with **installable PWA** support for a more app-like feel on mobile and desktop.
+**A retrieval-augmented (RAG) assistant over your own resilience notes and challenges—Flask orchestrates Gemini + Pinecone; a small web client captures text and talks to the API.**
 
-## Features
+<p align="center">
+  <img src="https://img.shields.io/badge/RAG-retrieval%20augmented-0d9488?style=flat-square" alt="RAG: retrieval augmented" />
+  <img src="https://img.shields.io/badge/Pinecone-vector%20index-000000?style=flat-square&logo=pinecone&logoColor=white" alt="Pinecone" />
+  <img src="https://img.shields.io/badge/Vector%20embeddings-Gemini%20API-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="Vector embeddings (Gemini)" />
+  <img src="https://img.shields.io/badge/Gemini-AI-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="Gemini AI" />
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white" alt="Google Cloud Run" />
+  <img src="https://img.shields.io/badge/Firebase-platform-FFCA28?style=flat-square&logo=firebase&logoColor=black" alt="Firebase" />
+  <img src="https://img.shields.io/badge/Firestore-database-FFCA28?style=flat-square&logo=firebase&logoColor=black" alt="Firestore" />
+  <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT" />
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React" />
+  <img src="https://img.shields.io/badge/Python-3.x-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
+</p>
 
-- **Accounts**: Email/password auth with Firebase, protected routes, profile and email verification flows.
-- **Challenges**: Create timed challenges, track progress by day, archive completed ones, milestones and gentle progress feedback.
-- **Journaling**: Daily and per-challenge notes, editing, search (including fuzzy search via Fuse.js), and a dedicated notes history area.
-- **Assistant chat**: Personalized greetings and suggested prompts based on your active challenges; uses Gemini for conversation.
-- **RAG-style context**: The browser calls **`POST /api/embed`** (server-side Gemini; the API key never ships to the client), then authenticated **`/api/upsert-pinecone`** / **`/api/delete-pinecone`** keep Pinecone in sync so the assistant can retrieve snippets of your notes and challenge text. Core tracking still works in **Firestore** if the backend or Pinecone is unavailable.
-- **Progressive Web App**: Configured via `vite-plugin-pwa` with app manifest and icons.
+</div>
+
+---
+
+## Table of contents
+
+- [What this project is](#what-this-project-is)
+- [RAG and backend architecture](#rag-and-backend-architecture)
+- [Capabilities](#capabilities)
+- [Tech stack](#tech-stack)
+- [Local setup](#local-setup)
+- [Available scripts](#available-scripts)
+- [Environment variables reference](#environment-variables-reference)
+- [Deployment](#deployment)
+
+---
+
+## What this project is
+
+**Resilience Hub** is built around a **Python Flask API** that powers **RAG-style** assistance: user-authored challenge text and journal notes are **embedded**, **indexed in Pinecone**, and **retrieved at query time** so **Google Gemini** can answer with grounded snippets instead of generic advice. The same service verifies Firebase ID tokens, reads structured **Firestore** facts for the signed-in user, applies **rate limits** on expensive routes, and exposes **embed**, **Pinecone upsert/delete**, and **chat** endpoints (`app.py`, `server/routes/`).
+
+A **React (Vite) client** is included mainly as a shell to authenticate, edit challenges and notes, call `/api/*`, and render chat—but the **interesting systems work is server-side**: retrieval intent, vector search, prompt assembly, and model calls.
+
+## RAG and backend architecture
+
+1. **Indexing path**: The client obtains text embeddings (Gemini embedding model) and POSTs to the Flask **`/api/embed`** and **`/api/upsert-pinecone`** flows so vectors land in a **per-user** Pinecone namespace; deletes go through **`/api/delete-pinecone`** when content is removed.
+2. **Chat path**: **`/api/chat-assistant`** (see `server/routes/chat.py`) verifies the Firebase bearer token, builds **structured context** from Firestore (`server/assistant_facts.py`), and when **`needs_semantic_retrieval`** says the question needs note-level grounding, runs a **Pinecone query** (`_pinecone_matches_for_user`) to pull top-k chunks. That retrieved text is merged into the prompt; **Gemini** generates the reply (`server/gemini_client.py`).
+3. **Safety and ops**: **Token-bucket rate limits** protect Pinecone, embed, and chat routes; **CORS** is origin-locked for credentialed browser calls; **`GEMINI_API_KEY`** and **`PINECONE_API_KEY`** never ship in frontend env vars.
+
+If Pinecone or the API is down, **Firestore-backed tracking** in the client can still operate; **RAG enrichment** is the optional upgrade path.
+
+## Capabilities
+
+- **RAG assistant**: Semantic retrieval over your notes/challenges + Gemini chat, with Firestore-backed “facts” in the same prompt.
+- **Vector lifecycle**: Upsert and delete vectors via Flask blueprints; index name and API keys are server-only secrets.
+- **AuthN for APIs**: Bearer Firebase tokens and Admin SDK checks (e.g. email verification) on protected routes.
+- **Rate limiting & CORS**: Production-oriented controls on embedding, Pinecone, and chat traffic.
+- **Resilience tracking (product layer)**: Timed challenges, day logging, journaling, and history—data in Firestore; text mirrored into the vector index for retrieval.
+- **Static client**: React + TypeScript SPA used to drive the product and call the API; PWA packaging is secondary to the backend story.
 
 ## Tech stack
 
-| Area | Technology |
+| Layer | Technology |
 |------|------------|
-| Frontend | React 18, TypeScript, Vite, MUI, React Router, Framer Motion |
-| Auth & data | Firebase Authentication, Cloud Firestore |
-| AI | [Google Gen AI SDK](https://ai.google.dev/gemini-api/docs/migrate) (`google-genai`, Gemini) for chat and text embeddings |
-| Vector store API | Flask + `pinecone` (`server/app.py`, `server/routes/`) |
-| Charts | Chart.js / react-chartjs-2 |
+| **RAG & LLM** | Google Gemini (chat + embeddings), retrieval over Pinecone |
+| **API** | Flask 3, Flask-CORS, Gunicorn (production), route modules under `server/routes/` |
+| **Vectors & metadata** | Pinecone client; Firebase Admin + **Cloud Firestore** for user data and assistant facts |
+| **Client (thin)** | React 18, TypeScript, Vite, MUI — consumes `/api` and Firebase Auth in the browser |
 
 ## Local setup
 
-### 1. Clone and install (frontend)
+### 1. Clone the repository
 
 ```bash
 git clone <repository-url>
 cd resilience-hub
-npm install
 ```
 
-### 2. Environment variables (frontend)
+### 2. RAG backend (Flask)
 
-Copy the example file and fill in real values:
-
-```bash
-cp .env.example .env
-```
-
-At minimum, set the **Firebase** `VITE_*` variables so auth and Firestore work. The chat assistant and embeddings run server-side, so set **`GEMINI_API_KEY`** in the backend env (see "Backend" below) — never expose the Gemini key in any `VITE_*` variable. Do not commit `.env`.
-
-### 3. Run the Vite dev server
-
-```bash
-npm run dev
-```
-
-The dev server defaults to port **5173** and proxies **`/api`** to **`http://localhost:5001`** (see `vite.config.ts`), so Pinecone routes work locally when the Flask app is running.
-
-### 4. Run the Flask API (optional, for Pinecone)
-
-If you want vector upserts/deletes and richer assistant context:
+This is what serves **embed**, **Pinecone**, and **chat** (`http://localhost:5001` by default; root responds with a short **“RAG backend”** status string).
 
 ```bash
 python3 -m venv .venv
@@ -63,24 +89,45 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Create or extend a **`.env`** file in the project root (same file as the frontend or a dedicated backend env—`server/app.py` loads it via `python-dotenv`) with:
+Create or extend a **`.env`** in the project root (`app.py` loads it via `python-dotenv`):
 
 ```env
+GEMINI_API_KEY=
 PINECONE_API_KEY=
 PINECONE_INDEX_NAME=
 ```
 
-Then start the server (from the **repository root** so the `server` package resolves):
+Then:
 
 ```bash
 python -m server.app
 ```
 
-Or use `npm run server:dev` if you use the repo’s `.venv` path.
+Health check: `http://localhost:5001/api/test` (or `/` for the plain status message).
 
-Health check: open `http://localhost:5001/api/test` or the root URL for a simple status message.
+### 3. Web client (optional, for the full UI)
+
+```bash
+npm install
+cp .env.example .env
+# Fill VITE_* Firebase keys so auth and Firestore work in the browser.
+```
+
+Set **`GEMINI_API_KEY` only in the backend `.env`** — never in `VITE_*`. Do not commit `.env`.
+
+```bash
+npm run dev
+```
+
+Vite defaults to **5173** and proxies **`/api`** to **`http://localhost:5001`** (`vite.config.ts`) so the SPA talks to your local RAG API.
 
 ## Available scripts
+
+**Backend**
+
+- `python app.py` — Flask dev server for the RAG API (after activating `.venv` and installing `requirements.txt`)
+
+**Client**
 
 - `npm start` / `npm run dev` — Vite development server
 - `npm run build` — TypeScript check + production build to `dist/`
@@ -112,7 +159,7 @@ VITE_API_BASE_URL=
 VITE_BASE_PATH=
 ```
 
-**`VITE_API_BASE_URL`**: Cloud Run URL for the Flask API (no trailing slash). Leave empty locally so `/api` uses the Vite proxy.
+**`VITE_API_BASE_URL`**: Cloud Run URL for the Flask RAG API (no trailing slash). Leave empty locally so `/api` uses the Vite proxy.
 
 **`VITE_BASE_PATH`**: Public path when not hosted at domain root (e.g. `/resilience-hub/` for GitHub Pages project sites). Leave empty for local dev.
 
@@ -144,11 +191,11 @@ Never commit secrets; use `.env.example` as the template only.
 
 ## Deployment
 
-The app can be hosted as static files (e.g. **`dist/`** after `npm run build`). Firebase Hosting is configured in-repo as one option.
+The **RAG API** is deployed as its own container (**`Dockerfile`** at the repo root builds `app.py` + `server/`). The **static SPA** is a separate deployment (GitHub Pages, Firebase Hosting, etc.) and must point **`VITE_API_BASE_URL`** at that API in production.
 
-### Google Cloud Run (Flask API)
+### Google Cloud Run (Flask RAG API)
 
-The repo includes a **`Dockerfile`** that builds only the Python API (`server/`, entry `server.app:app`). Below is what **you** need on your side, then a typical deploy flow.
+The **`Dockerfile`** builds only the Python API. Below is what **you** need on your side, then a typical deploy flow.
 
 #### What you need
 
@@ -158,8 +205,8 @@ The repo includes a **`Dockerfile`** that builds only the Python API (`server/`,
    - `gcloud auth login`
    - `gcloud config set project YOUR_PROJECT_ID`
 4. **Secrets for the service**
-   - **`PINECONE_API_KEY`** and **`PINECONE_INDEX_NAME`** (same values you use locally). Prefer [Secret Manager](https://cloud.google.com/secret-manager) for the API key; at minimum set them as Cloud Run env vars in the console or via `--set-env-vars` (avoid logging them).
-5. **CORS**: Most `/api` calls use **`Authorization: Bearer`** (Firebase ID token), not cookies. The Flask app still uses **`supports_credentials: True`** in CORS, so **`ALLOWED_ORIGINS`** must be an explicit origin list (not `*`) in production. Set it to your real site origins, comma-separated, e.g. `https://YOURNAME.github.io`, `https://YOURNAME.github.io/resilience-hub`, and `http://localhost:5173` for local testing.
+   - **`GEMINI_API_KEY`**, **`PINECONE_API_KEY`**, and **`PINECONE_INDEX_NAME`**. Prefer [Secret Manager](https://cloud.google.com/secret-manager) for API keys; at minimum set them as Cloud Run env vars in the console or via `--set-env-vars` (avoid logging them).
+5. **CORS**: The browser sends **cookies/credentials** with some `/api` calls. That **does not work** with `Access-Control-Allow-Origin: *`. Set **`ALLOWED_ORIGINS`** on the service to your real site origins, comma-separated, e.g. `https://YOURNAME.github.io`, `https://YOURNAME.github.io/resilience-hub`, and `http://localhost:5173` for local testing.
 6. **Frontend URL**: Set **`VITE_API_BASE_URL`** in the static build to your Cloud Run origin (no trailing slash). The app uses it for all `/api/...` calls when not same-origin.
 
 #### Deploy from your machine (source build)
@@ -174,7 +221,7 @@ gcloud run deploy resilience-hub-api \
   --set-env-vars "PINECONE_INDEX_NAME=your-index-name,ALLOWED_ORIGINS=https://YOURNAME.github.io"
 ```
 
-Add **`PINECONE_API_KEY`** via the Cloud Run UI, or `--set-secrets` once the secret exists in Secret Manager, for example:
+Add **`PINECONE_API_KEY`** (and **`GEMINI_API_KEY`**) via the Cloud Run UI, or `--set-secrets` once secrets exist in Secret Manager, for example:
 
 ```bash
 echo -n 'YOUR_PINECONE_KEY' | gcloud secrets create pinecone-api-key --data-file=-
@@ -190,7 +237,7 @@ Replace **`us-central1`**, service name, index name, and origins with yours. Fir
 
 Smoke test: `curl -sS "https://YOUR-SERVICE-URL/api/test"`.
 
-### GitHub Pages
+### GitHub Pages (static client)
 
 Static hosting uses [**GitHub Actions**](.github/workflows/deploy-pages.yml): build output is uploaded to Pages (**source: GitHub Actions** in repo settings).
 
@@ -208,7 +255,7 @@ The workflow sets `VITE_BASE_PATH` to `/<repo>/` automatically. Local subpath ch
 VITE_BASE_PATH=/resilience-hub/ npm run build && npm run preview
 ```
 
-### Firebase Hosting
+### Firebase Hosting (static client)
 
 1. Install the CLI: `npm install -g firebase-tools`
 2. Log in: `firebase login`

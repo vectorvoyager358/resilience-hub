@@ -15,7 +15,9 @@ import os
 import sys
 import types
 import unittest
+from datetime import date
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +187,60 @@ class ChatContextPayloadTest(unittest.TestCase):
         self.assertEqual(notes[0]["preview"], "Insta 42m")
         self.assertEqual(notes[0].get("localCalendarHint"), "2026-01-20")
         self.assertEqual(payload["challenges"][0].get("startDate"), "2026-01-01T12:00:00.000Z")
+
+    def test_recent_challenge_notes_are_bounded_to_newest_twelve(self):
+        from server.chat_context import build_prompt_context_payload
+
+        user_doc = {
+            "timezone": "UTC",
+            "challenges": [
+                {
+                    "id": "c1",
+                    "name": "Reading",
+                    "startDate": "2026-01-01T00:00:00.000Z",
+                    "duration": 30,
+                    "cadence": "daily",
+                    "completedDays": 15,
+                    "notes": {str(i): f"note {i}" for i in range(1, 16)},
+                }
+            ],
+        }
+
+        payload = build_prompt_context_payload(user_doc)
+
+        notes = payload["challenges"][0]["recentChallengeNotes"]
+        self.assertEqual(len(notes), 12)
+        self.assertEqual([note["slot"] for note in notes], [str(i) for i in range(15, 3, -1)])
+        self.assertNotIn("3", [note["slot"] for note in notes])
+
+    def test_weekly_note_calendar_hint_uses_local_week_range(self):
+        from server.chat_context import build_prompt_context_payload
+
+        tz = ZoneInfo("America/Los_Angeles")
+        user_doc = {
+            "timezone": "America/Los_Angeles",
+            "challenges": [
+                {
+                    "id": "c1",
+                    "name": "Weekly check-in",
+                    "startDate": "2026-01-01T02:00:00.000Z",
+                    "duration": 4,
+                    "cadence": "weekly",
+                    "completedDays": 2,
+                    "notes": {"2": "second check-in"},
+                }
+            ],
+        }
+
+        with patch(
+            "server.chat_context.get_user_timezone_and_today",
+            return_value=(tz, date(2026, 1, 10), "America/Los_Angeles"),
+        ):
+            payload = build_prompt_context_payload(user_doc)
+
+        notes = payload["challenges"][0]["recentChallengeNotes"]
+        self.assertEqual(notes[0]["slot"], "2")
+        self.assertEqual(notes[0]["localCalendarHint"], "2026-01-07..2026-01-13")
 
 
 # ===========================================================================

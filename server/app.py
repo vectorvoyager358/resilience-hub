@@ -47,12 +47,14 @@ from .routes.embed import embed_routes
 from .routes.pinecone import pinecone_routes
 from .routes.push import push_routes
 from .routes.reminders import reminder_routes
+from .routes.weather import weather_routes
 
 app.register_blueprint(pinecone_routes)
 app.register_blueprint(reminder_routes)
 app.register_blueprint(chat_routes)
 app.register_blueprint(embed_routes)
 app.register_blueprint(push_routes)
+app.register_blueprint(weather_routes)
 
 
 @app.route("/api/test", methods=["GET"])

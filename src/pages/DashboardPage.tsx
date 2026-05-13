@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useId } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useId, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -82,6 +82,7 @@ import ClickAwayListener from '@mui/material/ClickAwayListener';
 import Fuse from 'fuse.js';
 import PeopleIcon from '@mui/icons-material/People';
 import { tryUpsertToPinecone, tryDeleteFromPinecone } from '../utils/api';
+import { authedGetJsonOptional } from '../api/http';
 import { upsertChallengeData, upsertDailyReflection } from '../services/pinecone';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
@@ -109,6 +110,67 @@ const CHALLENGE_MENU_WORD = 'Challenge';
 
 const WELCOME_HEADLINE_GRADIENT =
   'linear-gradient(90deg, #2ec4b6 0%, #34c9b8 18%, #42c4ae 34%, #55b88e 46%, #9ead3a 54%, #e0a010 68%, #f49418 82%, #ff9f1c 100%)';
+
+function celsiusToFahrenheitOneDecimal(c: number): number {
+  return Math.round((c * (9 / 5) + 32) * 10) / 10;
+}
+
+/** When `/api/weather` omits `emojis` (older server), infer day/night from `observationTimeLocal`. */
+function inferIsDayFromLocalClock(timeLocal: string | null | undefined): boolean | null {
+  if (timeLocal == null || typeof timeLocal !== 'string') return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(timeLocal.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  if (!Number.isFinite(h) || h < 0 || h > 23) return null;
+  return h >= 6 && h < 19;
+}
+
+function coerceWeatherIsDay(
+  raw: unknown,
+  observationTimeLocal: string | null | undefined
+): boolean {
+  if (raw === false || raw === 0 || raw === '0') return false;
+  if (raw === true || raw === 1 || raw === '1') return true;
+  const inferred = inferIsDayFromLocalClock(observationTimeLocal);
+  if (inferred !== null) return inferred;
+  return true;
+}
+
+/** Same rules as `server.routes.weather._weather_display_emojis` — used only when API has no `emojis`. */
+function reflectionWeatherEmojis(isDay: boolean, weatherCode: number): string {
+  const period = isDay ? '🌞' : '🌙';
+  const code = weatherCode;
+
+  if (code === 45 || code === 48) return `${period}🌫️`;
+  if ([51, 53, 55, 56, 57].includes(code)) return `${period}🌦️`;
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return `${period}🌧️`;
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return `${period}❄️`;
+  if ([95, 96, 99].includes(code)) return `${period}⛈️`;
+
+  if (code === 0) return isDay ? '🌞' : '🌙✨';
+  if (code === 1) return `${period}🌤️`;
+  if (code === 2) return `${period}⛅`;
+  if (code === 3) return `${period}☁️`;
+  return `${period}🌡️`;
+}
+
+type ReflectionWeatherApiPayload = {
+  temperatureC: number;
+  weatherCode: number;
+  isDay?: boolean | number;
+  observationTimeLocal?: string | null;
+  emojis?: string;
+};
+
+/** Prefer server `emojis`; if missing (stale Flask), match server rules client-side. */
+function reflectionWeatherDisplayEmojis(w: ReflectionWeatherApiPayload): string {
+  const fromApi = typeof w.emojis === 'string' ? w.emojis.trim() : '';
+  if (fromApi) return fromApi;
+  return reflectionWeatherEmojis(
+    coerceWeatherIsDay(w.isDay, w.observationTimeLocal ?? null),
+    w.weatherCode
+  );
+}
 
 const DAILY_DURATION_MIN = 10;
 const DAILY_DURATION_MAX = 365;
@@ -550,6 +612,18 @@ const DashboardPage: React.FC = () => {
   const [deleteLogDialogOpen, setDeleteLogDialogOpen] = useState(false);
   const [logToDelete, setLogToDelete] = useState<{ challengeId: string; day: number } | null>(null);
 
+  type LocalWeatherPayload = ReflectionWeatherApiPayload;
+
+  /** Bumped per weather load; stale geolocation callbacks skip work so one `/api/weather` runs (e.g. React 18 Strict Mode remount). */
+  const reflectionWeatherRequestSeq = useRef(0);
+
+  const [reflectionWeather, setReflectionWeather] = useState<LocalWeatherPayload | null>(null);
+  const [reflectionWeatherPhase, setReflectionWeatherPhase] = useState<
+    'idle' | 'loading' | 'geo_denied' | 'geo_error' | 'api_error' | 'ready'
+  >('idle');
+  /** Bumping this re-runs the geolocation + weather fetch from `useEffect`. */
+  const [reflectionWeatherRetry, setReflectionWeatherRetry] = useState(0);
+
   const handleSignOut = () => {
     setSignOutDialogOpen(true);
   };
@@ -679,6 +753,62 @@ const DashboardPage: React.FC = () => {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     });
   }, []);
+
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setReflectionWeather(null);
+      setReflectionWeatherPhase('idle');
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setReflectionWeatherPhase('geo_error');
+      return;
+    }
+    const seq = ++reflectionWeatherRequestSeq.current;
+    setReflectionWeatherPhase('loading');
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const authWithReady = auth as { authStateReady?: () => Promise<void> };
+          if (typeof authWithReady.authStateReady === 'function') {
+            await authWithReady.authStateReady();
+          }
+          if (seq !== reflectionWeatherRequestSeq.current) return;
+          if (!auth.currentUser) {
+            setReflectionWeather(null);
+            setReflectionWeatherPhase('api_error');
+            return;
+          }
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
+          const path = `/api/weather?lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}`;
+          const res = await authedGetJsonOptional<Record<string, unknown>>(path);
+          if (seq !== reflectionWeatherRequestSeq.current) return;
+          if (!res.ok) {
+            setReflectionWeather(null);
+            setReflectionWeatherPhase('api_error');
+            return;
+          }
+          setReflectionWeather(res.data as LocalWeatherPayload);
+          setReflectionWeatherPhase('ready');
+        } catch {
+          if (seq !== reflectionWeatherRequestSeq.current) return;
+          setReflectionWeather(null);
+          setReflectionWeatherPhase('api_error');
+        }
+      },
+      (err: GeolocationPositionError) => {
+        if (seq !== reflectionWeatherRequestSeq.current) return;
+        setReflectionWeather(null);
+        if (err.code === 1) {
+          setReflectionWeatherPhase('geo_denied');
+        } else {
+          setReflectionWeatherPhase('geo_error');
+        }
+      },
+      { enableHighAccuracy: false, maximumAge: 600_000, timeout: 15_000 }
+    );
+  }, [currentUser?.uid, reflectionWeatherRetry]);
 
   // Function to check if a date is today (unused but kept for future use)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1742,20 +1872,106 @@ const DashboardPage: React.FC = () => {
                   </Box>
                     )}
                   </Box>
-                  <Typography 
-                    component="span" 
-                    variant="caption" 
-                    sx={{ 
-                      color: 'text.secondary',
-                      fontWeight: 400,
-                      fontSize: { xs: '0.98rem', sm: '1rem' },
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      columnGap: 0.75,
+                      rowGap: 0.5,
                       mt: 0.5,
                       ml: { xs: 4, sm: 0 },
-                      display: 'block'
                     }}
                   >
-                    {getFormattedDate()}
-                  </Typography>
+                    <Typography
+                      component="span"
+                      variant="caption"
+                      sx={{
+                        color: 'text.secondary',
+                        fontWeight: 500,
+                        fontSize: { xs: '0.98rem', sm: '1rem' },
+                      }}
+                    >
+                      {getFormattedDate()}
+                    </Typography>
+                    {reflectionWeatherPhase === 'loading' && (
+                      <>
+                        <Typography component="span" variant="caption" color="text.disabled" aria-hidden>
+                          ·
+                        </Typography>
+                        <CircularProgress size={12} thickness={5} sx={{ flexShrink: 0 }} />
+                        <Typography component="span" variant="caption" color="text.secondary">
+                          Checking the weather…
+                        </Typography>
+                      </>
+                    )}
+                    {reflectionWeatherPhase === 'geo_denied' && (
+                      <>
+                        <Typography component="span" variant="caption" color="text.disabled" aria-hidden>
+                          ·
+                        </Typography>
+                        <Typography component="span" variant="caption" color="text.secondary">
+                          Allow this site to use your location to see weather.
+                        </Typography>
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={<WbSunnyIcon sx={{ fontSize: 18 }} />}
+                          onClick={() => setReflectionWeatherRetry((n) => n + 1)}
+                          sx={{ minWidth: 0, px: 0.5, py: 0, fontSize: '0.75rem' }}
+                        >
+                          Try again
+                        </Button>
+                      </>
+                    )}
+                    {(reflectionWeatherPhase === 'geo_error' || reflectionWeatherPhase === 'api_error') && (
+                      <>
+                        <Typography component="span" variant="caption" color="text.disabled" aria-hidden>
+                          ·
+                        </Typography>
+                        <Typography component="span" variant="caption" color="text.secondary">
+                          {reflectionWeatherPhase === 'api_error'
+                            ? "We couldn’t load the weather just now. You can try again in a moment."
+                            : 'We couldn’t detect your location. Try again when you have a clearer signal.'}
+                        </Typography>
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={<RefreshIcon sx={{ fontSize: 18 }} />}
+                          onClick={() => setReflectionWeatherRetry((n) => n + 1)}
+                          sx={{ minWidth: 0, px: 0.5, py: 0, fontSize: '0.75rem' }}
+                        >
+                          Try again
+                        </Button>
+                      </>
+                    )}
+                    {reflectionWeatherPhase === 'ready' && reflectionWeather && (
+                      <>
+                        <Typography component="span" variant="caption" color="text.disabled" aria-hidden>
+                          ·
+                        </Typography>
+                        <Box
+                          component="span"
+                          sx={{
+                            display: 'inline-flex',
+                            flexWrap: 'wrap',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            typography: 'caption',
+                            color: 'text.secondary',
+                            fontSize: { xs: '0.98rem', sm: '1rem' },
+                          }}
+                        >
+                          <Box component="span" aria-hidden sx={{ fontSize: '1.15rem', lineHeight: 1 }}>
+                            {reflectionWeatherDisplayEmojis(reflectionWeather)}
+                          </Box>
+                          <Box component="span" sx={{ fontWeight: 500, color: 'text.primary' }}>
+                            {celsiusToFahrenheitOneDecimal(reflectionWeather.temperatureC)}°F
+                          </Box>
+                        </Box>
+                      </>
+                    )}
+                  </Box>
                 </Box>
                 {userData.dailyNotes && userData.dailyNotes[today] ? (
                   <Typography 

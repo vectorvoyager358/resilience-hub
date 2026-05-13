@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from typing import Any, Dict, List
+from zoneinfo import ZoneInfo
 
 from server.assistant_facts import (
+    get_challenge_calendar_start_date,
     get_user_timezone_and_today,
     is_challenge_past_calendar_duration,
 )
@@ -29,11 +32,38 @@ def _truncate(s: str, max_len: int) -> str:
     return s[: max_len - 1] + "…"
 
 
+def _slot_sort_int(slot_key: str) -> int:
+    try:
+        return int(slot_key)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _calendar_hint_for_slot(ch: Dict[str, Any], slot_key: str, tz: ZoneInfo) -> str:
+    """Maps note slot → local calendar date (daily) or week range (weekly), aligned with the app."""
+    slot = _slot_sort_int(slot_key)
+    if slot < 1:
+        return ""
+    start = get_challenge_calendar_start_date(ch, tz)
+    if start is None:
+        return ""
+    cadence = ch.get("cadence") if ch.get("cadence") == "weekly" else "daily"
+    if cadence == "daily":
+        d = start + timedelta(days=slot - 1)
+        return d.isoformat()
+    week_start = start + timedelta(days=(slot - 1) * 7)
+    week_end = week_start + timedelta(days=6)
+    return f"{week_start.isoformat()}..{week_end.isoformat()}"
+
+
 def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 400) -> Dict[str, Any]:
     name = user_doc.get("name")
     tz, today, _tz_label = get_user_timezone_and_today(user_doc)
+    yesterday = today - timedelta(days=1)
     out: Dict[str, Any] = {
         "name": name if isinstance(name, str) else "",
+        "todayLocal": today.isoformat(),
+        "yesterdayLocal": yesterday.isoformat(),
         "challenges": [],
         "dailyNotesSummary": {},
     }
@@ -52,15 +82,20 @@ def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 
         notes_raw = ch.get("notes") or {}
         if not isinstance(notes_raw, dict):
             notes_raw = {}
-        note_snippets: List[Dict[str, Any]] = []
-        for day_key in sorted(notes_raw.keys(), key=lambda x: int(x) if str(x).isdigit() else 0):
+        # Highest slot numbers first so "yesterday" / recent logs stay in the bounded window.
+        filled_slots = []
+        for day_key in notes_raw.keys():
             txt = _note_text(notes_raw.get(day_key)).strip()
             if txt:
-                note_snippets.append(
-                    {"slot": day_key, "preview": _truncate(txt, note_limit)}
-                )
-            if len(note_snippets) >= 12:
-                break
+                filled_slots.append((str(day_key), txt))
+        filled_slots.sort(key=lambda pair: _slot_sort_int(pair[0]), reverse=True)
+        note_snippets: List[Dict[str, Any]] = []
+        for day_key, txt in filled_slots[:12]:
+            hint = _calendar_hint_for_slot(ch, day_key, tz)
+            row: Dict[str, Any] = {"slot": day_key, "preview": _truncate(txt, note_limit)}
+            if hint:
+                row["localCalendarHint"] = hint
+            note_snippets.append(row)
 
         try:
             cd = int(ch.get("completedDays") or 0)
@@ -72,10 +107,14 @@ def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 
 
         calendar_window_ended = is_challenge_past_calendar_duration(ch, today, tz)
 
+        raw_start = ch.get("startDate")
+        start_date = raw_start if isinstance(raw_start, str) else ""
+
         out["challenges"].append(
             {
                 "id": cid if isinstance(cid, str) else "",
                 "name": cname if isinstance(cname, str) else "",
+                "startDate": start_date,
                 "cadence": cadence,
                 "completedDays": cd,
                 "duration": max(1, dur),

@@ -139,11 +139,52 @@ class RagRoutingTest(unittest.TestCase):
     def test_generic_motivation(self):
         self.assertFalse(self.rag("How can I stay motivated?"))
 
+    def test_how_much_yesterday_triggers_rag(self):
+        self.assertTrue(
+            self.rag("How much did I spend on Instagram yesterday?")
+        )
+
     def test_empty_string(self):
         self.assertFalse(self.rag(""))
 
     def test_whitespace_only(self):
         self.assertFalse(self.rag("   "))
+
+
+# ===========================================================================
+# 1b. Rich context — challenge note ordering for chat prompts
+# ===========================================================================
+
+
+class ChatContextPayloadTest(unittest.TestCase):
+    """build_prompt_context_payload surfaces the newest filled slots first."""
+
+    def test_recent_challenge_notes_are_highest_slots_first(self):
+        from server.chat_context import build_prompt_context_payload
+
+        user_doc = {
+            "timezone": "UTC",
+            "name": "Test",
+            "challenges": [
+                {
+                    "id": "c1",
+                    "name": "Insta < 1hr",
+                    "startDate": "2026-01-01T12:00:00.000Z",
+                    "duration": 30,
+                    "cadence": "daily",
+                    "completedDays": 2,
+                    "notes": {"1": "day one note", "20": "Insta 42m"},
+                }
+            ],
+        }
+        payload = build_prompt_context_payload(user_doc)
+        self.assertIn("todayLocal", payload)
+        self.assertIn("yesterdayLocal", payload)
+        notes = payload["challenges"][0]["recentChallengeNotes"]
+        self.assertEqual(notes[0]["slot"], "20")
+        self.assertEqual(notes[0]["preview"], "Insta 42m")
+        self.assertEqual(notes[0].get("localCalendarHint"), "2026-01-20")
+        self.assertEqual(payload["challenges"][0].get("startDate"), "2026-01-01T12:00:00.000Z")
 
 
 # ===========================================================================

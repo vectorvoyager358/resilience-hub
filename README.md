@@ -88,6 +88,7 @@ If Pinecone or the API is down, **Firestore-backed tracking** in the client can 
 - **Vector lifecycle**: Upsert and delete vectors via Flask blueprints; index name and API keys are server-only secrets.
 - **AuthN for APIs**: Bearer Firebase tokens and Admin SDK checks (e.g. email verification) on protected routes.
 - **Rate limiting & CORS**: Production-oriented controls on embedding, Pinecone, and chat traffic.
+- **Dashboard weather**: Authenticated `/api/weather` proxy for current Open-Meteo conditions, driven by browser geolocation and rendered as best-effort dashboard context.
 - **Resilience tracking (product layer)**: Timed challenges, day logging, journaling, and history—data in Firestore; text mirrored into the vector index for retrieval.
 - **Static client**: React + TypeScript SPA used to drive the product and call the API; PWA packaging is secondary to the backend story.
 
@@ -172,7 +173,7 @@ Vite defaults to **5173** and proxies **`/api`** to **`http://localhost:5001`** 
 
 Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backend` (Python), `tests/e2e` (Playwright).
 
-More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/push-reminders.md`).
+More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/push-reminders.md`, and `docs/weather-dashboard.md`).
 
 ## Environment variables reference
 

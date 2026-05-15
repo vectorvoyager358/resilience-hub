@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useId, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useId, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -110,6 +110,9 @@ const CHALLENGE_MENU_WORD = 'Challenge';
 
 const WELCOME_HEADLINE_GRADIENT =
   'linear-gradient(90deg, #2ec4b6 0%, #34c9b8 18%, #42c4ae 34%, #55b88e 46%, #9ead3a 54%, #e0a010 68%, #f49418 82%, #ff9f1c 100%)';
+
+/** Collapsed height for Today's Reflection body text (line-clamp). */
+const DAILY_REFLECTION_PREVIEW_LINE_CLAMP = 4;
 
 function celsiusToFahrenheitOneDecimal(c: number): number {
   return Math.round((c * (9 / 5) + 32) * 10) / 10;
@@ -565,6 +568,7 @@ const DashboardPage: React.FC = () => {
   });
   const [lastKnownDate, setLastKnownDate] = useState<string>(() => getLocalDateKey());
   const today = lastKnownDate;
+  const todayReflectionText = userData.dailyNotes?.[today] ?? '';
 
   const activeChallenges = useMemo(
     () => userData.challenges.filter((c) => !isChallengePastCalendarDuration(c)),
@@ -608,6 +612,11 @@ const DashboardPage: React.FC = () => {
   const [deleteAllNotesDialogOpen, setDeleteAllNotesDialogOpen] = useState(false);
   const [deleteLogDialogOpen, setDeleteLogDialogOpen] = useState(false);
   const [logToDelete, setLogToDelete] = useState<{ challengeId: string; day: number } | null>(null);
+  const [dailyReflectionExpanded, setDailyReflectionExpanded] = useState(false);
+  const [dailyReflectionOverflows, setDailyReflectionOverflows] = useState(false);
+  const dailyReflectionBodyRef = useRef<HTMLParagraphElement | null>(null);
+  const dailyReflectionExpandedRef = useRef(false);
+  dailyReflectionExpandedRef.current = dailyReflectionExpanded;
 
   type LocalWeatherPayload = ReflectionWeatherApiPayload;
 
@@ -620,6 +629,37 @@ const DashboardPage: React.FC = () => {
   >('idle');
   /** Bumping this re-runs the geolocation + weather fetch from `useEffect`. */
   const [reflectionWeatherRetry, setReflectionWeatherRetry] = useState(0);
+
+  useLayoutEffect(() => {
+    dailyReflectionExpandedRef.current = false;
+    setDailyReflectionExpanded(false);
+  }, [today, todayReflectionText]);
+
+  useLayoutEffect(() => {
+    const el = dailyReflectionBodyRef.current;
+    if (!el || !todayReflectionText) {
+      setDailyReflectionOverflows(false);
+      return;
+    }
+    const measure = () => {
+      if (dailyReflectionExpandedRef.current) {
+        setDailyReflectionOverflows(true);
+        return;
+      }
+      setDailyReflectionOverflows(el.scrollHeight > el.clientHeight + 1);
+    };
+    measure();
+    const RO = typeof ResizeObserver !== 'undefined' ? ResizeObserver : null;
+    if (RO) {
+      const ro = new RO(() => {
+        measure();
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [todayReflectionText, dailyReflectionExpanded]);
 
   const handleSignOut = () => {
     setSignOutDialogOpen(true);
@@ -1974,19 +2014,45 @@ const DashboardPage: React.FC = () => {
                     )}
                   </Box>
                 </Box>
-                {userData.dailyNotes && userData.dailyNotes[today] ? (
-                  <Typography 
-                    variant="body1" 
-                    sx={{ 
-                      whiteSpace: 'pre-wrap',
-                      lineHeight: 1.7,
-                      color: 'text.secondary',
-                      position: 'relative',
-                      zIndex: 1
-                    }}
-                  >
-                    {userData.dailyNotes[today]}
-                  </Typography>
+                {todayReflectionText ? (
+                  <Box sx={{ position: 'relative', zIndex: 1 }}>
+                    <Typography
+                      ref={dailyReflectionBodyRef}
+                      variant="body1"
+                      sx={{
+                        whiteSpace: 'pre-wrap',
+                        lineHeight: 1.7,
+                        color: 'text.secondary',
+                        wordBreak: 'break-word',
+                        ...(!dailyReflectionExpanded && {
+                          display: '-webkit-box',
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          WebkitLineClamp: DAILY_REFLECTION_PREVIEW_LINE_CLAMP,
+                        }),
+                      }}
+                    >
+                      {todayReflectionText}
+                    </Typography>
+                    {dailyReflectionOverflows ? (
+                      <Button
+                        size="small"
+                        variant="text"
+                        color="primary"
+                        onClick={() => setDailyReflectionExpanded((v) => !v)}
+                        sx={{
+                          alignSelf: 'flex-start',
+                          mt: 0.5,
+                          px: 0,
+                          minWidth: 0,
+                          textTransform: 'none',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {dailyReflectionExpanded ? 'Show less' : 'Read more'}
+                      </Button>
+                    ) : null}
+                  </Box>
                 ) : (
                   <Button
                     variant="outlined"

@@ -42,6 +42,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import EditNoteIcon from '@mui/icons-material/EditNote';
+import CloseIcon from '@mui/icons-material/Close';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
@@ -612,27 +613,22 @@ const DashboardPage: React.FC = () => {
   const [deleteAllNotesDialogOpen, setDeleteAllNotesDialogOpen] = useState(false);
   const [deleteLogDialogOpen, setDeleteLogDialogOpen] = useState(false);
   const [logToDelete, setLogToDelete] = useState<{ challengeId: string; day: number } | null>(null);
-  const [dailyReflectionExpanded, setDailyReflectionExpanded] = useState(false);
+  const [dailyReflectionReadDialogOpen, setDailyReflectionReadDialogOpen] = useState(false);
   const [dailyReflectionOverflows, setDailyReflectionOverflows] = useState(false);
   const dailyReflectionBodyRef = useRef<HTMLParagraphElement | null>(null);
-  const dailyReflectionExpandedRef = useRef(false);
-  dailyReflectionExpandedRef.current = dailyReflectionExpanded;
 
   type LocalWeatherPayload = ReflectionWeatherApiPayload;
 
-  /** Bumped per weather load; stale geolocation callbacks skip work so one `/api/weather` runs (e.g. React 18 Strict Mode remount). */
   const reflectionWeatherRequestSeq = useRef(0);
 
   const [reflectionWeather, setReflectionWeather] = useState<LocalWeatherPayload | null>(null);
   const [reflectionWeatherPhase, setReflectionWeatherPhase] = useState<
     'idle' | 'loading' | 'geo_denied' | 'geo_error' | 'api_error' | 'ready'
   >('idle');
-  /** Bumping this re-runs the geolocation + weather fetch from `useEffect`. */
   const [reflectionWeatherRetry, setReflectionWeatherRetry] = useState(0);
 
   useLayoutEffect(() => {
-    dailyReflectionExpandedRef.current = false;
-    setDailyReflectionExpanded(false);
+    setDailyReflectionReadDialogOpen(false);
   }, [today, todayReflectionText]);
 
   useLayoutEffect(() => {
@@ -642,10 +638,6 @@ const DashboardPage: React.FC = () => {
       return;
     }
     const measure = () => {
-      if (dailyReflectionExpandedRef.current) {
-        setDailyReflectionOverflows(true);
-        return;
-      }
       setDailyReflectionOverflows(el.scrollHeight > el.clientHeight + 1);
     };
     measure();
@@ -659,7 +651,7 @@ const DashboardPage: React.FC = () => {
     }
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [todayReflectionText, dailyReflectionExpanded]);
+  }, [todayReflectionText]);
 
   const handleSignOut = () => {
     setSignOutDialogOpen(true);
@@ -2024,12 +2016,10 @@ const DashboardPage: React.FC = () => {
                         lineHeight: 1.7,
                         color: 'text.secondary',
                         wordBreak: 'break-word',
-                        ...(!dailyReflectionExpanded && {
-                          display: '-webkit-box',
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                          WebkitLineClamp: DAILY_REFLECTION_PREVIEW_LINE_CLAMP,
-                        }),
+                        display: '-webkit-box',
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        WebkitLineClamp: DAILY_REFLECTION_PREVIEW_LINE_CLAMP,
                       }}
                     >
                       {todayReflectionText}
@@ -2039,7 +2029,7 @@ const DashboardPage: React.FC = () => {
                         size="small"
                         variant="text"
                         color="primary"
-                        onClick={() => setDailyReflectionExpanded((v) => !v)}
+                        onClick={() => setDailyReflectionReadDialogOpen(true)}
                         sx={{
                           alignSelf: 'flex-start',
                           mt: 0.5,
@@ -2049,7 +2039,7 @@ const DashboardPage: React.FC = () => {
                           fontWeight: 600,
                         }}
                       >
-                        {dailyReflectionExpanded ? 'Show less' : 'Read more'}
+                        Read more
                       </Button>
                     ) : null}
                   </Box>
@@ -3198,6 +3188,79 @@ const DashboardPage: React.FC = () => {
             </Button>
             <Button onClick={confirmSignOut} variant="contained" color="primary" startIcon={<LogoutIcon />}>
               Sign Out
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Today's Reflection — full entry (opaque modal, same pattern as Notes History) */}
+        <Dialog
+          open={dailyReflectionReadDialogOpen}
+          onClose={() => setDailyReflectionReadDialogOpen(false)}
+          maxWidth="md"
+          fullWidth
+          scroll="paper"
+          PaperProps={{
+            sx: {
+              borderRadius: 3,
+              bgcolor: '#ffffff',
+              border: '1px solid rgba(46, 196, 182, 0.12)',
+              maxHeight: 'min(88vh, 720px)',
+              display: 'flex',
+              flexDirection: 'column',
+            },
+          }}
+        >
+          <DialogTitle sx={{ pb: 1, flexShrink: 0 }}>
+            <Stack direction="row" spacing={1.5} alignItems="flex-start">
+              <Avatar sx={{ bgcolor: 'primary.main', width: 36, height: 36, mt: 0.25 }}>
+                <EditNoteIcon fontSize="small" />
+              </Avatar>
+              <Box sx={{ flex: 1, minWidth: 0, pt: 0.25 }}>
+                <Typography variant="h6" fontWeight={600}>
+                  Today&apos;s Reflection
+                </Typography>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  {getFormattedDate()}
+                </Typography>
+              </Box>
+              <IconButton
+                aria-label="Close reflection"
+                onClick={() => setDailyReflectionReadDialogOpen(false)}
+                size="small"
+                sx={{ mt: -0.5, mr: -0.5 }}
+              >
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </Stack>
+          </DialogTitle>
+          <DialogContent
+            sx={{
+              flex: '1 1 auto',
+              overflowY: 'auto',
+              pt: 0,
+              borderTop: 'none',
+              borderBottom: 'none',
+            }}
+          >
+            <Typography
+              variant="body1"
+              sx={{
+                whiteSpace: 'pre-wrap',
+                lineHeight: 1.8,
+                color: 'text.secondary',
+                wordBreak: 'break-word',
+              }}
+            >
+              {todayReflectionText}
+            </Typography>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2.5, pt: 1, flexShrink: 0 }}>
+            <Button
+              onClick={() => setDailyReflectionReadDialogOpen(false)}
+              variant="contained"
+              color="primary"
+            >
+              Close
             </Button>
           </DialogActions>
         </Dialog>

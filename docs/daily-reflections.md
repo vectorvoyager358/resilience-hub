@@ -149,4 +149,3 @@ Run the focused frontend suite from the repository root:
 ```bash
 npm run test:run -- tests/frontend/pages/DashboardPage.feature.test.tsx
 ```
-

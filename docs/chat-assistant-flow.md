@@ -141,13 +141,15 @@ The backend builds **one large prompt** in `_build_system_prompt` (`server/route
 
 Structured JSON from **`build_assistant_facts`** (`server/assistant_facts.py`): counts, active vs archived challenge lists, planned duration style fields, reflection-day style summaries, etc. This is the **source of truth for numeric / list questions**.
 
+For daily reflections, the facts layer includes **`dailyReflections.daysWithNote`** and **`dailyReflections.hasNoteToday`**. The backend computes "today" from `users/{uid}.timezone` when present, defaulting to UTC if the timezone has not been synced.
+
 ### Rich context (what it is for)
 
 A **JSON string** from **`prompt_context_json`** (`server/chat_context.py`), built by **`build_prompt_context_payload`**. It includes:
 
 - User **name**
 - Up to **48** challenges, each with id, name, cadence, completed days, duration, **calendar window ended**, **challengeStatus** (active vs archived), and up to **12** per-challenge note **previews** (truncated)
-- **`dailyNotesSummary`**: up to **14** recent dates with truncated note text
+- **`dailyNotesSummary`**: up to **14** recent dates with truncated note text. For the full reflection lifecycle, see [`daily-reflections.md`](daily-reflections.md).
 
 Use: **names, tone, recent wording, and narrative color** when RAG is off or incomplete. Not the primary source for strict counts (the prompt tells the model to follow facts for that).
 

@@ -15,6 +15,7 @@ from server.chat_context import prompt_context_json
 from server.firebase_util import init_firebase_admin, verify_bearer_uid_and_email_verified
 from server.gemini_client import generate_chat_reply
 from server.intent_chat import needs_semantic_retrieval
+from server.prompt_loader import render_chat_system_prompt
 from server.rate_limit import TokenBucketLimiter
 
 logger = logging.getLogger(__name__)
@@ -259,39 +260,15 @@ def _build_system_prompt(
     rag_block: str,
     history_lines: str,
     user_message: str,
-) -> str:
+) -> tuple[str, str]:
     facts_s = json.dumps(assistant_facts, ensure_ascii=False, indent=2)
-    return f"""You are a personal resilience coach assistant.
-
-Rules:
-- For **app-derived** aggregates (how many challenges, active vs archived counts, daily vs weekly cadence totals, reflection-day counts, planned duration slots), use ONLY the "Authoritative facts" JSON. Never infer those aggregates from retrieved memories.
-- For **values the user typed in their own logs** (screen time, mood scores, spend, hours, “Insta 45m”, etc.), treat challenge note previews in Rich context and retrieved memories as the source of truth when present. Match the user’s calendar wording (“yesterday”, “today”) to `yesterdayLocal` / `todayLocal` and each note’s `localCalendarHint` when provided. Do not say you lack access if that text is in Rich context or memories—quote or paraphrase it; if it is truly missing, say so briefly.
-- For questions about **active** challenges (how many active, list active, duration for each active challenge), use ONLY `challenges.challengeLists.active` and `challenges.activeCount`. The length of `challengeLists.active` MUST equal `activeCount`. Do NOT list challenges from `challengeLists.archived` or from Rich context for an "active-only" answer.
-- For **all** challenges (including ended), you may use both `challengeLists.active` and `challengeLists.archived` plus counts—but only when the user asks for everything / archived too / total list.
-- Per-challenge **planned duration** for factual answers must come from `durationSummary` / `plannedSlots` / `totalCalendarDaysInPlannedWindow` inside those challenge list entries—not from memory or Rich context alone.
-- Retrieved memories may be incomplete (top-K search). Use them for themes, wording, and recall—including user-logged quantities when the question asks for them.
-- If memories are empty, rely on facts + rich context; do not invent past journal content.
-- Rich context lists challenge rows with notes for recall and user-logged detail. For questions about **challenge list counts**, active vs archived, or **planned** durations, trust ONLY Authoritative facts (`challengeLists`, counts)—never enumerate “all challenges” from Rich context alone for those aggregates.
-- Rich context lists each challenge with `challengeStatus` ("active" | "archived") and `calendarWindowEnded` (boolean). For ANY challenge where `challengeStatus` is "archived", do NOT treat it as ongoing tracking—do not advise logging further days in that challenge window or imply they should "keep going" on that same timed challenge. Acknowledge it ended; answer with reflection, lessons, habits to carry forward, or starting a new challenge if appropriate.
-- When the user names a challenge, match it to the Rich context entry by name and respect that entry's `challengeStatus`.
-- Keep responses under 220 words, warm and encouraging.
-- Do not give medical or clinical diagnoses; encourage professional help for crises.
-
-Authoritative facts (app-derived aggregates and planned durations):
-{facts_s}
-
-Rich context (challenge names, startDate, recent note previews with optional localCalendarHint — may overlap with memories):
-{context_json}
-
-Retrieved memories (semantic search — optional):
-{rag_block}
-
-Recent conversation:
-{history_lines}
-
-User message:
-{user_message}
-"""
+    return render_chat_system_prompt(
+        facts_json=facts_s,
+        context_json=context_json,
+        rag_block=rag_block,
+        history_lines=history_lines,
+        user_message=user_message,
+    )
 
 
 @chat_routes.route("/api/chat-assistant", methods=["POST"])
@@ -345,7 +322,7 @@ def chat_assistant():
         rag_block = _format_rag_lines(prompt_matches)
         history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
 
-        prompt = _build_system_prompt(
+        prompt, prompt_version = _build_system_prompt(
             assistant_facts=facts,
             context_json=context_json,
             rag_block=rag_block,
@@ -378,6 +355,7 @@ def chat_assistant():
                 "reply": reply,
                 "sources": sources,
                 "meta": {
+                    "promptVersion": prompt_version,
                     "usedRag": bool(use_rag and prompt_matches),
                     "ragRequested": use_rag,
                     "sourceCount": len(sources),

@@ -202,6 +202,7 @@ Built by **`matches_to_sources`** from the **prompt slice** (top **`RAG_PROMPT_K
 | **`sourceCount`** | Length of `sources` (≤ **`ragPromptK`**). |
 | **`retrieveCount`** | Raw Pinecone match count (≤ **`ragRetrieveK`**). |
 | **`ragRetrieveK`** / **`ragPromptK`** | Config used for this request (0 when RAG off). |
+| **`promptVersion`** | Template id for the system prompt (default **`chat_v1`**, file `server/prompts/chat_v1.txt`). |
 
 So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index returned no rows or Pinecone was skipped due to missing env / failure (matches empty).
 
@@ -229,6 +230,7 @@ See **`.env.example`** for the authoritative list. Commonly relevant for this fl
 - **`CHAT_SOURCE_SNIPPET_CHARS`** — max length of each `sources[].snippet` in the JSON response (default `320`).
 - **`RAG_RETRIEVE_K`** — Pinecone `top_k` (default `24`).
 - **`RAG_PROMPT_K`** — how many retrieved chunks go into the prompt and `sources[]` (default `8`; capped by retrieve K).
+- **`CHAT_PROMPT_VERSION`** — prompt template name (default `chat_v1` → `server/prompts/chat_v1.txt`).
 
 ---
 

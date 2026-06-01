@@ -27,6 +27,38 @@ MAX_HISTORY_CONTENT_CHARS = 8000
 # API citation snippets (shorter than prompt content cap).
 SOURCE_SNIPPET_MAX_CHARS = int(os.environ.get("CHAT_SOURCE_SNIPPET_CHARS", "320"))
 
+# Pinecone retrieve width vs how many chunks go into the prompt / sources[] (#71).
+_RAG_RETRIEVE_K_DEFAULT = 24
+_RAG_PROMPT_K_DEFAULT = 8
+_RAG_K_MAX = 100
+
+
+def _parse_rag_k_env(key: str, default: int) -> int:
+    raw = (os.environ.get(key) or "").strip()
+    if not raw:
+        return default
+    try:
+        n = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %d", key, raw, default)
+        return default
+    if n < 1:
+        logger.warning("%s must be >= 1 (got %d); using default %d", key, n, default)
+        return default
+    if n > _RAG_K_MAX:
+        logger.warning("%s capped at %d (got %d)", key, _RAG_K_MAX, n)
+        return _RAG_K_MAX
+    return n
+
+
+def rag_k_limits() -> tuple[int, int]:
+    """Return (retrieve_k, prompt_k) for Pinecone query and prompt/sources slice."""
+    retrieve_k = _parse_rag_k_env("RAG_RETRIEVE_K", _RAG_RETRIEVE_K_DEFAULT)
+    prompt_k = _parse_rag_k_env("RAG_PROMPT_K", _RAG_PROMPT_K_DEFAULT)
+    if prompt_k > retrieve_k:
+        prompt_k = retrieve_k
+    return retrieve_k, prompt_k
+
 # Per-UID/IP token buckets to cap Gemini/Pinecone usage.
 _UID_RATE_CAPACITY = int(os.environ.get("CHAT_UID_RATE_CAPACITY", "3"))
 _UID_RATE_REFILL = float(os.environ.get("CHAT_UID_RATE_REFILL_PER_SEC", "0.5"))
@@ -125,7 +157,7 @@ def _sanitize_chat_payload(message: str, history_raw: object) -> tuple[str, List
     return msg, history
 
 
-def _pinecone_matches_for_user(uid: str, query_text: str, top_k: int = 8) -> List[Dict[str, Any]]:
+def _pinecone_matches_for_user(uid: str, query_text: str, top_k: int) -> List[Dict[str, Any]]:
     try:
         from pinecone import Pinecone  # type: ignore[import-untyped]
         import os
@@ -303,11 +335,14 @@ def chat_assistant():
         context_json = prompt_context_json(user_doc)
 
         use_rag = needs_semantic_retrieval(message)
+        retrieve_k, prompt_k = rag_k_limits()
         matches: List[Dict[str, Any]] = []
+        prompt_matches: List[Dict[str, Any]] = []
         if use_rag:
-            matches = _pinecone_matches_for_user(uid, message)
+            matches = _pinecone_matches_for_user(uid, message, top_k=retrieve_k)
+            prompt_matches = matches[:prompt_k]
 
-        rag_block = _format_rag_lines(matches)
+        rag_block = _format_rag_lines(prompt_matches)
         history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
 
         prompt = _build_system_prompt(
@@ -326,7 +361,7 @@ def chat_assistant():
             rag_block=rag_block,
             history_lines=history_lines,
             use_rag=use_rag,
-            match_count=len(matches),
+            match_count=len(prompt_matches),
             history_turns=len(history),
         )
 
@@ -336,16 +371,19 @@ def chat_assistant():
             logger.warning("Gemini chat failed: %s", e)
             return jsonify({"error": "model_unavailable", "detail": str(e)}), 503
 
-        sources = matches_to_sources(matches) if use_rag else []
+        sources = matches_to_sources(prompt_matches) if use_rag else []
 
         return jsonify(
             {
                 "reply": reply,
                 "sources": sources,
                 "meta": {
-                    "usedRag": bool(use_rag and matches),
+                    "usedRag": bool(use_rag and prompt_matches),
                     "ragRequested": use_rag,
                     "sourceCount": len(sources),
+                    "retrieveCount": len(matches) if use_rag else 0,
+                    "ragRetrieveK": retrieve_k if use_rag else 0,
+                    "ragPromptK": prompt_k if use_rag else 0,
                 },
             }
         )

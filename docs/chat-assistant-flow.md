@@ -171,16 +171,34 @@ Order inside **`chat_assistant`** (`server/routes/chat.py`):
 8. **`_build_system_prompt`** → single string.
 9. Optional **logging** of prompt sizes / preview / full prompt (see `.env.example`: `CHAT_LOG_*`, `LOG_LEVEL`).
 10. **`generate_chat_reply(prompt)`** → **`503`** `model_unavailable` on configured Gemini errors.
-11. Return **`200`** JSON: **`reply`**, **`meta.ragRequested`**, **`meta.usedRag`**.
+11. Return **`200`** JSON: **`reply`**, **`sources`**, **`meta.ragRequested`**, **`meta.usedRag`**, **`meta.sourceCount`**.
 
 ---
 
-## 5. Response `meta` fields
+## 5. Response `sources` and `meta` fields
+
+### `sources` (top-level array)
+
+Built by **`matches_to_sources`** from Pinecone matches when RAG was requested. Each item:
+
+| Field | Meaning |
+|-------|--------|
+| **`id`** | Pinecone vector id, or `match-0`, … if missing |
+| **`type`** | Metadata `type` (e.g. `note`, `reflection`) or `"memory"` |
+| **`date`** | Optional `date` / `dateCreated` from metadata |
+| **`snippet`** | Truncated text (default max **320** chars via `CHAT_SOURCE_SNIPPET_CHARS`) |
+| **`score`** | Similarity score, or `null` |
+
+- **RAG off:** `sources` is `[]`.
+- **RAG on, no matches:** `sources` is `[]` (prompt still has the empty-memory placeholder).
+
+### `meta`
 
 | Field | Meaning |
 |-------|--------|
 | **`ragRequested`** | `needs_semantic_retrieval(message)` was **true** (router chose the RAG path). |
 | **`usedRag`** | RAG was requested **and** at least one Pinecone match was returned (`use_rag and matches`). |
+| **`sourceCount`** | Length of `sources` (same as match count when RAG ran). |
 
 So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index returned no rows or Pinecone was skipped due to missing env / failure (matches empty).
 
@@ -205,6 +223,7 @@ See **`.env.example`** for the authoritative list. Commonly relevant for this fl
 - **`PINECONE_API_KEY`**, **`PINECONE_INDEX_NAME`** — optional; without them, RAG query path tends to yield no matches.
 - **`CHAT_UID_RATE_*`**, **`CHAT_IP_RATE_*`** — token buckets for `/api/chat-assistant`.
 - **`CHAT_LOG_PROMPT_PREVIEW_CHARS`**, **`CHAT_LOG_FULL_PROMPT`**, **`LOG_LEVEL`** — prompt observability (treat full prompts as **sensitive**).
+- **`CHAT_SOURCE_SNIPPET_CHARS`** — max length of each `sources[].snippet` in the JSON response (default `320`).
 
 ---
 

@@ -24,6 +24,8 @@ chat_routes = Blueprint("chat", __name__)
 MAX_USER_MESSAGE_CHARS = 4000
 MAX_HISTORY_TURNS = 14
 MAX_HISTORY_CONTENT_CHARS = 8000
+# API citation snippets (shorter than prompt content cap).
+SOURCE_SNIPPET_MAX_CHARS = int(os.environ.get("CHAT_SOURCE_SNIPPET_CHARS", "320"))
 
 # Per-UID/IP token buckets to cap Gemini/Pinecone usage.
 _UID_RATE_CAPACITY = int(os.environ.get("CHAT_UID_RATE_CAPACITY", "3"))
@@ -151,8 +153,10 @@ def _pinecone_matches_for_user(uid: str, query_text: str, top_k: int = 8) -> Lis
             content = md.get("content")
             if not isinstance(content, str):
                 content = ""
+            vector_id = getattr(m, "id", None)
             matches.append(
                 {
+                    "id": vector_id if isinstance(vector_id, str) else None,
                     "score": getattr(m, "score", None),
                     "content": content[:4000],
                     "metadata": {
@@ -181,6 +185,39 @@ def _format_rag_lines(matches: List[Dict[str, Any]]) -> str:
         when = f" ({date_str})" if date_str else ""
         lines.append(f"- {type_label}: {text}{when}")
     return "\n".join(lines) if lines else "(No matching indexed memories.)"
+
+
+def _coerce_source_score(raw: Any) -> float | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    return None
+
+
+def matches_to_sources(matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build API-facing citation objects from internal Pinecone match dicts."""
+    sources: List[Dict[str, Any]] = []
+    for idx, match in enumerate(matches):
+        md = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+        raw_type = md.get("type")
+        type_label = raw_type if isinstance(raw_type, str) and raw_type.strip() else "memory"
+        raw_date = md.get("date")
+        date_str = raw_date if isinstance(raw_date, str) and raw_date.strip() else None
+        content = match.get("content")
+        text = content if isinstance(content, str) else ""
+        vector_id = match.get("id")
+        source_id = vector_id if isinstance(vector_id, str) and vector_id.strip() else f"match-{idx}"
+        sources.append(
+            {
+                "id": source_id,
+                "type": type_label,
+                "date": date_str,
+                "snippet": text[:SOURCE_SNIPPET_MAX_CHARS],
+                "score": _coerce_source_score(match.get("score")),
+            }
+        )
+    return sources
 
 
 def _build_system_prompt(
@@ -299,12 +336,16 @@ def chat_assistant():
             logger.warning("Gemini chat failed: %s", e)
             return jsonify({"error": "model_unavailable", "detail": str(e)}), 503
 
+        sources = matches_to_sources(matches) if use_rag else []
+
         return jsonify(
             {
                 "reply": reply,
+                "sources": sources,
                 "meta": {
                     "usedRag": bool(use_rag and matches),
                     "ragRequested": use_rag,
+                    "sourceCount": len(sources),
                 },
             }
         )

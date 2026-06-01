@@ -3,7 +3,9 @@
 Coverage:
   1. needs_semantic_retrieval() — RAG routing for a golden set of prompts.
   2. _sanitize_chat_payload()   — input truncation and history capping.
-  3. /api/chat-assistant        — auth (401), email gate (403), rate limit (429).
+  2b. matches_to_sources()      — API citation shape (#70).
+  2c. rag_k_limits()            — RAG_RETRIEVE_K / RAG_PROMPT_K (#71).
+  3. /api/chat-assistant        — auth (401), email gate (403), rate limit (429), sources[].
      All endpoint tests stub out Firebase, Firestore, and Gemini so no live
      network calls are made.
 """
@@ -302,6 +304,77 @@ class SanitizeChatPayloadTest(unittest.TestCase):
 
 
 # ===========================================================================
+# 2b. Retrieval sources — matches_to_sources()
+# ===========================================================================
+
+class MatchesToSourcesTest(unittest.TestCase):
+    """API citation shape for Pinecone matches (#70)."""
+
+    def setUp(self):
+        from server.routes.chat import matches_to_sources
+        self.to_sources = matches_to_sources
+
+    def test_empty_matches(self):
+        self.assertEqual(self.to_sources([]), [])
+
+    def test_maps_id_type_date_snippet_score(self):
+        matches = [
+            {
+                "id": "uid-note-abc-123",
+                "score": 0.91,
+                "content": "Felt stressed after work but meditated.",
+                "metadata": {"type": "note", "date": "2026-01-15"},
+            }
+        ]
+        out = self.to_sources(matches)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["id"], "uid-note-abc-123")
+        self.assertEqual(out[0]["type"], "note")
+        self.assertEqual(out[0]["date"], "2026-01-15")
+        self.assertEqual(out[0]["snippet"], "Felt stressed after work but meditated.")
+        self.assertAlmostEqual(out[0]["score"], 0.91)
+
+    def test_fallback_id_when_vector_id_missing(self):
+        out = self.to_sources([{"content": "x", "metadata": {}}])
+        self.assertEqual(out[0]["id"], "match-0")
+        self.assertEqual(out[0]["type"], "memory")
+        self.assertIsNone(out[0]["date"])
+
+    def test_snippet_truncated(self):
+        long_text = "A" * 500
+        out = self.to_sources([{"content": long_text, "metadata": {"type": "reflection"}}])
+        self.assertEqual(len(out[0]["snippet"]), 320)
+
+
+# ===========================================================================
+# 2c. RAG retrieve_k / prompt_k — rag_k_limits()
+# ===========================================================================
+
+class RagKLimitsTest(unittest.TestCase):
+    """Env-configurable Pinecone width vs prompt/sources cap (#71)."""
+
+    def test_defaults(self):
+        from server.routes.chat import rag_k_limits
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RAG_RETRIEVE_K", None)
+            os.environ.pop("RAG_PROMPT_K", None)
+            self.assertEqual(rag_k_limits(), (24, 8))
+
+    def test_prompt_k_capped_by_retrieve_k(self):
+        from server.routes.chat import rag_k_limits
+
+        with patch.dict(os.environ, {"RAG_RETRIEVE_K": "5", "RAG_PROMPT_K": "20"}, clear=False):
+            self.assertEqual(rag_k_limits(), (5, 5))
+
+    def test_custom_values(self):
+        from server.routes.chat import rag_k_limits
+
+        with patch.dict(os.environ, {"RAG_RETRIEVE_K": "12", "RAG_PROMPT_K": "3"}, clear=False):
+            self.assertEqual(rag_k_limits(), (12, 3))
+
+
+# ===========================================================================
 # 3. /api/chat-assistant endpoint — auth, email gate, rate limit
 # ===========================================================================
 
@@ -417,6 +490,107 @@ class ChatEndpointRateLimitTest(unittest.TestCase):
                 headers={"Authorization": "Bearer fake"},
             )
         self.assertEqual(r.status_code, 400)
+
+
+class ChatEndpointSourcesTest(unittest.TestCase):
+    """Response includes sources[] when RAG returns matches (#70)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app_module = _load_app()
+        cls.client = cls.app_module.app.test_client()
+
+    def test_sources_empty_when_rag_not_requested(self):
+        user_doc = {"challenges": [], "dailyNotes": {}}
+        with _stub_verified_uid("uid-src", email_verified=True):
+            with patch("server.routes.chat.firestore.Client") as mock_fs:
+                mock_fs.return_value.collection.return_value.document.return_value.get.return_value = (
+                    types.SimpleNamespace(exists=True, to_dict=lambda: user_doc)
+                )
+                with patch("server.routes.chat.needs_semantic_retrieval", return_value=False):
+                    with patch("server.routes.chat.generate_chat_reply", return_value="ok"):
+                        r = self.client.post(
+                            "/api/chat-assistant",
+                            json={"message": "how many active challenges"},
+                            headers={"Authorization": "Bearer fake"},
+                        )
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertEqual(body.get("sources"), [])
+        self.assertEqual(body["meta"]["sourceCount"], 0)
+        self.assertFalse(body["meta"]["ragRequested"])
+
+    def test_sources_populated_when_rag_matches(self):
+        user_doc = {"challenges": [], "dailyNotes": {}}
+        fake_matches = [
+            {
+                "id": "uid-note-c1-1",
+                "score": 0.88,
+                "content": "Morning run felt great.",
+                "metadata": {"type": "note", "date": "2026-02-01"},
+            }
+        ]
+        with _stub_verified_uid("uid-src2", email_verified=True):
+            with patch("server.routes.chat.firestore.Client") as mock_fs:
+                mock_fs.return_value.collection.return_value.document.return_value.get.return_value = (
+                    types.SimpleNamespace(exists=True, to_dict=lambda: user_doc)
+                )
+                with patch("server.routes.chat.needs_semantic_retrieval", return_value=True):
+                    with patch(
+                        "server.routes.chat._pinecone_matches_for_user", return_value=fake_matches
+                    ):
+                        with patch("server.routes.chat.generate_chat_reply", return_value="ok"):
+                            r = self.client.post(
+                                "/api/chat-assistant",
+                                json={"message": "what did I write about running"},
+                                headers={"Authorization": "Bearer fake"},
+                            )
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertEqual(len(body["sources"]), 1)
+        self.assertEqual(body["sources"][0]["id"], "uid-note-c1-1")
+        self.assertEqual(body["sources"][0]["type"], "note")
+        self.assertTrue(body["meta"]["usedRag"])
+
+    def test_sources_trimmed_to_prompt_k(self):
+        user_doc = {"challenges": [], "dailyNotes": {}}
+        fake_matches = [
+            {
+                "id": f"uid-note-{i}",
+                "score": 0.9 - i * 0.01,
+                "content": f"Note {i}",
+                "metadata": {"type": "note", "date": "2026-02-01"},
+            }
+            for i in range(5)
+        ]
+        with _stub_verified_uid("uid-src3", email_verified=True):
+            with patch.dict(os.environ, {"RAG_RETRIEVE_K": "5", "RAG_PROMPT_K": "2"}, clear=False):
+                with patch("server.routes.chat.firestore.Client") as mock_fs:
+                    mock_fs.return_value.collection.return_value.document.return_value.get.return_value = (
+                        types.SimpleNamespace(exists=True, to_dict=lambda: user_doc)
+                    )
+                    with patch("server.routes.chat.needs_semantic_retrieval", return_value=True):
+                        with patch(
+                            "server.routes.chat._pinecone_matches_for_user",
+                            return_value=fake_matches,
+                        ) as mock_pc:
+                            with patch(
+                                "server.routes.chat.generate_chat_reply", return_value="ok"
+                            ):
+                                r = self.client.post(
+                                    "/api/chat-assistant",
+                                    json={"message": "what did I write"},
+                                    headers={"Authorization": "Bearer fake"},
+                                )
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        mock_pc.assert_called_once()
+        self.assertEqual(mock_pc.call_args.kwargs.get("top_k"), 5)
+        self.assertEqual(len(body["sources"]), 2)
+        self.assertEqual(body["sources"][0]["id"], "uid-note-0")
+        self.assertEqual(body["meta"]["sourceCount"], 2)
+        self.assertEqual(body["meta"]["retrieveCount"], 5)
+        self.assertEqual(body["meta"]["ragPromptK"], 2)
 
 
 if __name__ == "__main__":

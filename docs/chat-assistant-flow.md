@@ -167,11 +167,12 @@ Order inside **`chat_assistant`** (`server/routes/chat.py`):
 4. Derive client IP ( **`X-Forwarded-For`** first hop, else **`remote_addr`** ); apply **per-UID and per-IP** token-bucket rate limits → **`429`** `rate_limited` if exceeded.
 5. **Firestore** `users/{uid}` → **`404`** `user_not_found` if missing.
 6. **`build_assistant_facts(user_doc)`** and **`prompt_context_json(user_doc)`**.
-7. **`needs_semantic_retrieval(message)`** → if true, **Pinecone path** (embed + query).
-8. **`_build_system_prompt`** → single string.
-9. Optional **logging** of prompt sizes / preview / full prompt (see `.env.example`: `CHAT_LOG_*`, `LOG_LEVEL`).
-10. **`generate_chat_reply(prompt)`** → **`503`** `model_unavailable` on configured Gemini errors.
-11. Return **`200`** JSON: **`reply`**, **`sources`**, **`meta.ragRequested`**, **`meta.usedRag`**, **`meta.sourceCount`**.
+7. **`needs_semantic_retrieval(message)`** → if true, **Pinecone path** (embed + query with **`RAG_RETRIEVE_K`**, default 24).
+8. Keep the top **`RAG_PROMPT_K`** matches (default 8) for **`rag_block`**, **`sources`**, and the model prompt.
+9. **`_build_system_prompt`** → single string.
+10. Optional **logging** of prompt sizes / preview / full prompt (see `.env.example`: `CHAT_LOG_*`, `LOG_LEVEL`).
+11. **`generate_chat_reply(prompt)`** → **`503`** `model_unavailable` on configured Gemini errors.
+12. Return **`200`** JSON: **`reply`**, **`sources`**, **`meta`** (see below).
 
 ---
 
@@ -179,7 +180,7 @@ Order inside **`chat_assistant`** (`server/routes/chat.py`):
 
 ### `sources` (top-level array)
 
-Built by **`matches_to_sources`** from Pinecone matches when RAG was requested. Each item:
+Built by **`matches_to_sources`** from the **prompt slice** (top **`RAG_PROMPT_K`** of Pinecone results) when RAG was requested. Each item:
 
 | Field | Meaning |
 |-------|--------|
@@ -197,8 +198,10 @@ Built by **`matches_to_sources`** from Pinecone matches when RAG was requested. 
 | Field | Meaning |
 |-------|--------|
 | **`ragRequested`** | `needs_semantic_retrieval(message)` was **true** (router chose the RAG path). |
-| **`usedRag`** | RAG was requested **and** at least one Pinecone match was returned (`use_rag and matches`). |
-| **`sourceCount`** | Length of `sources` (same as match count when RAG ran). |
+| **`usedRag`** | RAG was requested **and** at least one match is in the prompt slice. |
+| **`sourceCount`** | Length of `sources` (≤ **`ragPromptK`**). |
+| **`retrieveCount`** | Raw Pinecone match count (≤ **`ragRetrieveK`**). |
+| **`ragRetrieveK`** / **`ragPromptK`** | Config used for this request (0 when RAG off). |
 
 So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index returned no rows or Pinecone was skipped due to missing env / failure (matches empty).
 
@@ -224,6 +227,8 @@ See **`.env.example`** for the authoritative list. Commonly relevant for this fl
 - **`CHAT_UID_RATE_*`**, **`CHAT_IP_RATE_*`** — token buckets for `/api/chat-assistant`.
 - **`CHAT_LOG_PROMPT_PREVIEW_CHARS`**, **`CHAT_LOG_FULL_PROMPT`**, **`LOG_LEVEL`** — prompt observability (treat full prompts as **sensitive**).
 - **`CHAT_SOURCE_SNIPPET_CHARS`** — max length of each `sources[].snippet` in the JSON response (default `320`).
+- **`RAG_RETRIEVE_K`** — Pinecone `top_k` (default `24`).
+- **`RAG_PROMPT_K`** — how many retrieved chunks go into the prompt and `sources[]` (default `8`; capped by retrieve K).
 
 ---
 

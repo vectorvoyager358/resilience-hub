@@ -3,8 +3,9 @@
 Coverage:
   1. needs_semantic_retrieval() — RAG routing for a golden set of prompts.
   2. _sanitize_chat_payload()   — input truncation and history capping.
-  2b. matches_to_sources()      — API citation shape (#70).
-  2c. rag_k_limits()            — RAG_RETRIEVE_K / RAG_PROMPT_K (#71).
+  2b. matches_to_sources()      — API citation shape.
+  2c. rag_k_limits()            — RAG_RETRIEVE_K / RAG_PROMPT_K.
+  2d. versioned prompts         — server/prompts + promptVersion.
   3. /api/chat-assistant        — auth (401), email gate (403), rate limit (429), sources[].
      All endpoint tests stub out Firebase, Firestore, and Gemini so no live
      network calls are made.
@@ -308,7 +309,7 @@ class SanitizeChatPayloadTest(unittest.TestCase):
 # ===========================================================================
 
 class MatchesToSourcesTest(unittest.TestCase):
-    """API citation shape for Pinecone matches (#70)."""
+    """API citation shape for Pinecone matches."""
 
     def setUp(self):
         from server.routes.chat import matches_to_sources
@@ -351,7 +352,7 @@ class MatchesToSourcesTest(unittest.TestCase):
 # ===========================================================================
 
 class RagKLimitsTest(unittest.TestCase):
-    """Env-configurable Pinecone width vs prompt/sources cap (#71)."""
+    """Env-configurable Pinecone width vs prompt/sources cap."""
 
     def test_defaults(self):
         from server.routes.chat import rag_k_limits
@@ -372,6 +373,28 @@ class RagKLimitsTest(unittest.TestCase):
 
         with patch.dict(os.environ, {"RAG_RETRIEVE_K": "12", "RAG_PROMPT_K": "3"}, clear=False):
             self.assertEqual(rag_k_limits(), (12, 3))
+
+
+# ===========================================================================
+# 2d. Versioned chat prompts
+# ===========================================================================
+
+class ChatPromptTemplateTest(unittest.TestCase):
+    def test_render_includes_sections_and_version(self):
+        from server.prompt_loader import render_chat_system_prompt
+
+        prompt, version = render_chat_system_prompt(
+            facts_json='{"activeCount": 1}',
+            context_json='{"challenges": []}',
+            rag_block="(No matching indexed memories.)",
+            history_lines="(none)",
+            user_message="Hello coach",
+        )
+        self.assertEqual(version, "chat_v1")
+        self.assertIn("personal resilience coach", prompt)
+        self.assertIn('"activeCount": 1', prompt)
+        self.assertIn("Hello coach", prompt)
+        self.assertIn("(No matching indexed memories.)", prompt)
 
 
 # ===========================================================================
@@ -493,7 +516,7 @@ class ChatEndpointRateLimitTest(unittest.TestCase):
 
 
 class ChatEndpointSourcesTest(unittest.TestCase):
-    """Response includes sources[] when RAG returns matches (#70)."""
+    """Response includes sources[] when RAG returns matches."""
 
     @classmethod
     def setUpClass(cls):
@@ -519,6 +542,7 @@ class ChatEndpointSourcesTest(unittest.TestCase):
         self.assertEqual(body.get("sources"), [])
         self.assertEqual(body["meta"]["sourceCount"], 0)
         self.assertFalse(body["meta"]["ragRequested"])
+        self.assertEqual(body["meta"].get("promptVersion"), "chat_v1")
 
     def test_sources_populated_when_rag_matches(self):
         user_doc = {"challenges": [], "dailyNotes": {}}

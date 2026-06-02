@@ -31,11 +31,217 @@ import { apiUrl } from '../utils/apiBase';
 import { auth } from '../services/firebase';
 import { livelyMenuFabSx } from '../styles/livelyMenuFab';
 
+/** One retrieved memory returned by `/api/chat-assistant` (`sources[]`). */
+export interface ChatRetrievalSource {
+  index: number;
+  id: string;
+  type: string;
+  date?: string | null;
+  snippet: string;
+  score?: number | null;
+}
+
 interface Message {
   id: string;
   content: string;
   sender: 'user' | 'assistant';
   timestamp: Date;
+  sources?: ChatRetrievalSource[];
+}
+
+function parseChatSources(raw: unknown): ChatRetrievalSource[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChatRetrievalSource[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const s = item as Record<string, unknown>;
+    const index = typeof s.index === 'number' ? s.index : NaN;
+    const id = typeof s.id === 'string' ? s.id : '';
+    const type = typeof s.type === 'string' ? s.type : 'memory';
+    const snippet = typeof s.snippet === 'string' ? s.snippet : '';
+    if (!Number.isFinite(index) || !snippet.trim()) continue;
+    out.push({
+      index,
+      id,
+      type,
+      snippet,
+      date: typeof s.date === 'string' ? s.date : null,
+      score: typeof s.score === 'number' ? s.score : null,
+    });
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
+
+/** Single `[7]` or grouped `[1, 2]` / `[7,8]` from the model. */
+const CITATION_BLOCK_RE = /\[\s*(\d+(?:\s*,\s*\d+)*)\s*\]/g;
+
+function parseCitationIndexes(capture: string): number[] {
+  return capture
+    .split(',')
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
+
+const messageBodyTypographySx = {
+  whiteSpace: 'pre-wrap' as const,
+  wordBreak: 'break-word' as const,
+  overflowWrap: 'break-word' as const,
+  '& ul, & ol': {
+    pl: 2,
+    mb: 1,
+  },
+  '& li': {
+    mb: 0.5,
+  },
+};
+
+/** Keeps `[`, commas, `]`, and digits on one baseline (no superscript). */
+const citationGroupSx = {
+  display: 'inline-flex',
+  alignItems: 'baseline',
+  flexWrap: 'nowrap',
+  verticalAlign: 'baseline',
+  fontSize: 'inherit',
+  lineHeight: 'inherit',
+  fontVariantNumeric: 'tabular-nums',
+  color: 'text.secondary',
+  whiteSpace: 'nowrap',
+  mx: 0.125,
+};
+
+const citationNumSx = {
+  display: 'inline',
+  cursor: 'default',
+  color: 'primary.main',
+  fontWeight: 600,
+  textDecoration: 'underline',
+  textDecorationStyle: 'dotted',
+  textUnderlineOffset: '2px',
+  '&:hover': {
+    textDecorationStyle: 'solid',
+  },
+};
+
+function CitationTooltipTitle({ source }: { source: ChatRetrievalSource }) {
+  return (
+    <Box sx={{ maxWidth: 320 }}>
+      <Typography variant="caption" component="div" sx={{ fontWeight: 600, mb: 0.5 }}>
+        {source.type}
+        {source.date ? ` · ${source.date}` : ''}
+      </Typography>
+      <Typography variant="caption" component="div" sx={{ whiteSpace: 'pre-wrap' }}>
+        {source.snippet}
+      </Typography>
+    </Box>
+  );
+}
+
+function CitationIndexMark({
+  index,
+  sourceByIndex,
+  markKey,
+}: {
+  index: number;
+  sourceByIndex: Map<number, ChatRetrievalSource>;
+  markKey: string;
+}) {
+  const source = sourceByIndex.get(index);
+  const label = String(index);
+  if (!source) {
+    return <>{label}</>;
+  }
+  return (
+    <Tooltip
+      key={markKey}
+      title={<CitationTooltipTitle source={source} />}
+      arrow
+      placement="top"
+      enterDelay={200}
+      describeChild
+    >
+      <Box component="span" sx={citationNumSx}>
+        {label}
+      </Box>
+    </Tooltip>
+  );
+}
+
+function renderCitationBlock(
+  indexes: number[],
+  sourceByIndex: Map<number, ChatRetrievalSource>,
+  blockKey: string,
+): React.ReactNode {
+  if (indexes.length === 0) {
+    return null;
+  }
+  const hasAnySource = indexes.some((idx) => sourceByIndex.has(idx));
+  if (!hasAnySource) {
+    return `[${indexes.join(', ')}]`;
+  }
+  return (
+    <Box component="span" key={blockKey} sx={citationGroupSx}>
+      <span>[</span>
+      {indexes.map((idx, i) => (
+        <React.Fragment key={`${blockKey}-${idx}`}>
+          {i > 0 ? <span>,&nbsp;</span> : null}
+          <CitationIndexMark
+            index={idx}
+            sourceByIndex={sourceByIndex}
+            markKey={`${blockKey}-mark-${idx}`}
+          />
+        </React.Fragment>
+      ))}
+      <span>]</span>
+    </Box>
+  );
+}
+
+function AssistantMessageBody({
+  content,
+  sources,
+}: {
+  content: string;
+  sources?: ChatRetrievalSource[];
+}) {
+  const sourceByIndex = useMemo(() => {
+    const map = new Map<number, ChatRetrievalSource>();
+    for (const src of sources ?? []) {
+      map.set(src.index, src);
+    }
+    return map;
+  }, [sources]);
+
+  const body = useMemo(() => {
+    if (!sourceByIndex.size) {
+      return content;
+    }
+
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let partKey = 0;
+    CITATION_BLOCK_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = CITATION_BLOCK_RE.exec(content)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(content.slice(lastIndex, match.index));
+      }
+      const marker = match[0];
+      const indexes = parseCitationIndexes(match[1]);
+      const rendered = renderCitationBlock(indexes, sourceByIndex, `cite-block-${partKey++}`);
+      parts.push(rendered ?? marker);
+      lastIndex = match.index + marker.length;
+    }
+    if (lastIndex < content.length) {
+      parts.push(content.slice(lastIndex));
+    }
+    return parts.length > 0 ? parts : content;
+  }, [content, sourceByIndex]);
+
+  return (
+    <Typography variant="body2" sx={messageBodyTypographySx}>
+      {body}
+    </Typography>
+  );
 }
 
 const CHAT_STORAGE_VERSION = 1;
@@ -68,7 +274,14 @@ function parseStoredMessages(data: unknown): Message[] {
           ? ts
           : new Date(NaN);
     if (Number.isNaN(d.getTime())) continue;
-    out.push({ id: m.id, content: m.content, sender: m.sender, timestamp: d });
+    const sources = parseChatSources(m.sources);
+    out.push({
+      id: m.id,
+      content: m.content,
+      sender: m.sender,
+      timestamp: d,
+      ...(sources.length > 0 ? { sources } : {}),
+    });
   }
   return out;
 }
@@ -431,7 +644,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       });
 
       const rawText = await response.text();
-      let data: { reply?: string; error?: string; detail?: string } = {};
+      let data: { reply?: string; sources?: unknown; error?: string; detail?: string } = {};
       if (rawText.trim()) {
         try {
           data = JSON.parse(rawText) as typeof data;
@@ -465,11 +678,13 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       }
 
       const plainTextResponse = convertMarkdownToPlainText(replyText);
+      const sources = parseChatSources(data.sources);
       const assistantMessage: Message = {
         id: createMessageId(),
         content: plainTextResponse,
         sender: 'assistant',
         timestamp: new Date(),
+        ...(sources.length > 0 ? { sources } : {}),
       };
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
@@ -725,23 +940,16 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
                     wordBreak: 'break-word',
                   }}
                 >
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      overflowWrap: 'break-word',
-                      '& ul, & ol': {
-                        pl: 2,
-                        mb: 1,
-                      },
-                      '& li': {
-                        mb: 0.5,
-                      }
-                    }}
-                  >
-                    {message.content}
-                  </Typography>
+                  {message.sender === 'assistant' ? (
+                    <AssistantMessageBody
+                      content={message.content}
+                      sources={message.sources}
+                    />
+                  ) : (
+                    <Typography variant="body2" sx={messageBodyTypographySx}>
+                      {message.content}
+                    </Typography>
+                  )}
                   <Box sx={{ 
                     display: 'flex', 
                     alignItems: 'center', 

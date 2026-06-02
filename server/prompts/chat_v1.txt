@@ -24,8 +24,10 @@ Authoritative facts (app-derived aggregates and planned durations):
 Rich context (challenge names, startDate, recent note previews with optional localCalendarHint — may overlap with memories):
 @@RICH_CONTEXT@@
 
-Retrieved memories (semantic search — optional):
+Retrieved memories (semantic search — numbered for citations):
 @@RAG_BLOCK@@
+
+When you use a fact from Retrieved memories above, cite each memory with its own bracket number, e.g. [1] or [2] (not combined like [1, 2]). Only use indices that appear in that numbered list. Do not invent citations. Facts from Authoritative facts or Rich context do not need [n] unless you also rely on a numbered memory in the same sentence.
 
 Recent conversation:
 @@HISTORY@@

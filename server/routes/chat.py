@@ -17,6 +17,7 @@ from server.gemini_client import generate_chat_reply
 from server.intent_chat import needs_semantic_retrieval
 from server.prompt_loader import render_chat_system_prompt
 from server.rate_limit import TokenBucketLimiter
+from server.rerank import rerank_enabled, rerank_pinecone_matches
 
 logger = logging.getLogger(__name__)
 
@@ -315,9 +316,12 @@ def chat_assistant():
         retrieve_k, prompt_k = rag_k_limits()
         matches: List[Dict[str, Any]] = []
         prompt_matches: List[Dict[str, Any]] = []
+        rerank_applied = False
         if use_rag:
             matches = _pinecone_matches_for_user(uid, message, top_k=retrieve_k)
-            prompt_matches = matches[:prompt_k]
+            prompt_matches, rerank_applied = rerank_pinecone_matches(
+                message, matches, top_n=prompt_k
+            )
 
         rag_block = _format_rag_lines(prompt_matches)
         history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
@@ -362,6 +366,8 @@ def chat_assistant():
                     "retrieveCount": len(matches) if use_rag else 0,
                     "ragRetrieveK": retrieve_k if use_rag else 0,
                     "ragPromptK": prompt_k if use_rag else 0,
+                    "rerankEnabled": bool(use_rag and rerank_applied),
+                    "rerankConfigured": rerank_enabled(),
                 },
             }
         )

@@ -206,9 +206,12 @@ def _pinecone_matches_for_user(uid: str, query_text: str, top_k: int) -> List[Di
         return []
 
 
-def _format_rag_lines(matches: List[Dict[str, Any]]) -> str:
+def _format_numbered_rag_block(matches: List[Dict[str, Any]]) -> str:
+    """Numbered list for citation markers [1], [2] aligned with sources[].index."""
+    if not matches:
+        return "(No matching indexed memories.)"
     lines: List[str] = []
-    for match in matches:
+    for i, match in enumerate(matches, start=1):
         md = match.get("metadata") or {}
         t = md.get("type") if isinstance(md, dict) else None
         type_label = t if isinstance(t, str) else "memory"
@@ -217,8 +220,8 @@ def _format_rag_lines(matches: List[Dict[str, Any]]) -> str:
         content = match.get("content")
         text = content if isinstance(content, str) else ""
         when = f" ({date_str})" if date_str else ""
-        lines.append(f"- {type_label}: {text}{when}")
-    return "\n".join(lines) if lines else "(No matching indexed memories.)"
+        lines.append(f"[{i}] {type_label}{when}: {text}")
+    return "\n".join(lines)
 
 
 def _coerce_source_score(raw: Any) -> float | None:
@@ -244,6 +247,7 @@ def matches_to_sources(matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         source_id = vector_id if isinstance(vector_id, str) and vector_id.strip() else f"match-{idx}"
         sources.append(
             {
+                "index": idx + 1,
                 "id": source_id,
                 "type": type_label,
                 "date": date_str,
@@ -323,7 +327,7 @@ def chat_assistant():
                 message, matches, top_n=prompt_k
             )
 
-        rag_block = _format_rag_lines(prompt_matches)
+        rag_block = _format_numbered_rag_block(prompt_matches)
         history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
 
         prompt, prompt_version = _build_system_prompt(
@@ -368,6 +372,7 @@ def chat_assistant():
                     "ragPromptK": prompt_k if use_rag else 0,
                     "rerankEnabled": bool(use_rag and rerank_applied),
                     "rerankConfigured": rerank_enabled(),
+                    "citationsEnabled": bool(use_rag and prompt_matches),
                 },
             }
         )

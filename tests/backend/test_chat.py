@@ -388,6 +388,7 @@ class MatchesToSourcesTest(unittest.TestCase):
         ]
         out = self.to_sources(matches)
         self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["index"], 1)
         self.assertEqual(out[0]["id"], "uid-note-abc-123")
         self.assertEqual(out[0]["type"], "note")
         self.assertEqual(out[0]["date"], "2026-01-15")
@@ -404,6 +405,28 @@ class MatchesToSourcesTest(unittest.TestCase):
         long_text = "A" * 500
         out = self.to_sources([{"content": long_text, "metadata": {"type": "reflection"}}])
         self.assertEqual(len(out[0]["snippet"]), 320)
+
+
+class NumberedRagBlockTest(unittest.TestCase):
+    """Numbered memories align with sources[].index (#74)."""
+
+    def test_numbered_format(self):
+        from server.routes.chat import _format_numbered_rag_block
+
+        block = _format_numbered_rag_block(
+            [
+                {
+                    "content": "Felt stressed.",
+                    "metadata": {"type": "note", "date": "2026-01-15"},
+                },
+                {
+                    "content": "Better day.",
+                    "metadata": {"type": "reflection", "date": "2026-01-16"},
+                },
+            ]
+        )
+        self.assertIn("[1] note (2026-01-15): Felt stressed.", block)
+        self.assertIn("[2] reflection (2026-01-16): Better day.", block)
 
 
 # ===========================================================================

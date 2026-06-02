@@ -189,7 +189,8 @@ Built by **`matches_to_sources`** from the **prompt slice** (top **`RAG_PROMPT_K
 | **`type`** | Metadata `type` (e.g. `note`, `reflection`) or `"memory"` |
 | **`date`** | Optional `date` / `dateCreated` from metadata |
 | **`snippet`** | Truncated text (default max **320** chars via `CHAT_SOURCE_SNIPPET_CHARS`) |
-| **`score`** | Similarity score, or `null` |
+| **`index`** | Citation number **1..N** (matches `[1]`, `[2]` in the model reply and prompt). |
+| **`score`** | Rerank or similarity score, or `null` |
 
 - **RAG off:** `sources` is `[]`.
 - **RAG on, no matches:** `sources` is `[]` (prompt still has the empty-memory placeholder).
@@ -206,6 +207,7 @@ Built by **`matches_to_sources`** from the **prompt slice** (top **`RAG_PROMPT_K
 | **`promptVersion`** | Template id for the system prompt (default **`chat_v1`**, file `server/prompts/chat_v1.txt`). |
 | **`rerankEnabled`** | **`true`** when Cohere rerank ran and re-ordered this request’s prompt slice. |
 | **`rerankConfigured`** | **`true`** when `COHERE_API_KEY` is set and `RERANK_ENABLED` is not off. |
+| **`citationsEnabled`** | **`true`** when RAG returned at least one memory in the prompt slice. |
 
 So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index returned no rows or Pinecone was skipped due to missing env / failure (matches empty).
 
@@ -216,6 +218,7 @@ So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index 
 **`ChatAssistant`** (`src/components/ChatAssistant.tsx`):
 
 - Sends **`POST /api/chat-assistant`** with **`Authorization: Bearer <idToken>`**, JSON **`{ message, conversationHistory }`**, and **`credentials: 'include'`** on the `fetch` (aligned with Flask CORS `supports_credentials`).
+- Reads **`sources`** from the response. When the reply includes **`[1]`**, **`[2]`**, or grouped **`[1, 2]`**, each index that matches **`sources[].index`** is interactive: **hover** that number to see type, date, and snippet.
 - Client-side message length is capped to stay aligned with server limits; server still truncates defensively.
 
 **UI-only protection:** routes like **`ProtectedRoute`** enforce sign-in and email verification in the SPA. **Enforcement for cost and abuse** is on the server (verified email, rate limits, auth).

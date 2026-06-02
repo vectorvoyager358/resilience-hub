@@ -12,6 +12,7 @@ from server.assistant_facts import (
     get_user_timezone_and_today,
     is_challenge_past_calendar_duration,
 )
+from server.challenge_progress import challenge_logging_snapshot
 
 
 def _note_text(val: Any) -> str:
@@ -110,6 +111,7 @@ def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 
         raw_start = ch.get("startDate")
         start_date = raw_start if isinstance(raw_start, str) else ""
 
+        logging = challenge_logging_snapshot(ch, today, tz)
         out["challenges"].append(
             {
                 "id": cid if isinstance(cid, str) else "",
@@ -121,6 +123,7 @@ def build_prompt_context_payload(user_doc: Dict[str, Any], *, note_limit: int = 
                 "calendarWindowEnded": calendar_window_ended,
                 "challengeStatus": "archived" if calendar_window_ended else "active",
                 "recentChallengeNotes": note_snippets,
+                **logging,
             }
         )
 

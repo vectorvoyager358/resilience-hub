@@ -245,6 +245,65 @@ class ChatContextPayloadTest(unittest.TestCase):
         self.assertEqual(notes[0]["slot"], "2")
         self.assertEqual(notes[0]["localCalendarHint"], "2026-01-07..2026-01-13")
 
+    def test_streak_zero_when_gap_since_last_log(self):
+        """Mirrors dashboard: streak breaks when timeline advanced past last logged slot."""
+        from server.chat_context import build_prompt_context_payload
+
+        tz = ZoneInfo("UTC")
+        user_doc = {
+            "timezone": "UTC",
+            "challenges": [
+                {
+                    "id": "c-insta",
+                    "name": "Insta < 1hr",
+                    "startDate": "2026-01-01T00:00:00.000Z",
+                    "duration": 30,
+                    "cadence": "daily",
+                    "completedDays": 5,
+                    "notes": {"1": "ok", "20": "under limit"},
+                },
+            ],
+        }
+        with patch(
+            "server.chat_context.get_user_timezone_and_today",
+            return_value=(tz, date(2026, 1, 25), "UTC"),
+        ):
+            ch = build_prompt_context_payload(user_doc)["challenges"][0]
+        self.assertEqual(ch["loggedStreak"], 0)
+        self.assertFalse(ch["streakActive"])
+        self.assertTrue(ch["missedLogSinceLastEntry"])
+        self.assertEqual(ch["mostRecentLoggedSlot"], 20)
+
+    def test_no_shower_note_is_logged_not_a_skip(self):
+        """'No shower today' on a filled slot is a successful log, not a missed day."""
+        from server.challenge_progress import last_logged_gap
+
+        tz = ZoneInfo("UTC")
+        ch = {
+            "startDate": "2026-01-01T00:00:00.000Z",
+            "duration": 30,
+            "cadence": "daily",
+            "notes": {"15": "No shower today"},
+        }
+        today = date(2026, 1, 15)
+        self.assertIsNone(last_logged_gap(ch, today, tz))
+
+    def test_last_logged_gap_between_entries(self):
+        from server.challenge_progress import last_logged_gap
+
+        tz = ZoneInfo("UTC")
+        ch = {
+            "startDate": "2026-01-01T00:00:00.000Z",
+            "duration": 30,
+            "cadence": "daily",
+            "notes": {"10": "logged", "15": "logged again"},
+        }
+        gap = last_logged_gap(ch, date(2026, 1, 15), tz)
+        self.assertIsNotNone(gap)
+        self.assertEqual(gap["missedSlotStart"], 11)
+        self.assertEqual(gap["missedSlotEnd"], 14)
+        self.assertEqual(gap["missedSlotCount"], 4)
+
 
 # ===========================================================================
 # 2. Input sanitisation — _sanitize_chat_payload()
@@ -395,6 +454,55 @@ class ChatPromptTemplateTest(unittest.TestCase):
         self.assertIn('"activeCount": 1', prompt)
         self.assertIn("Hello coach", prompt)
         self.assertIn("(No matching indexed memories.)", prompt)
+
+
+# ===========================================================================
+# 2e. Cohere rerank (#73)
+# ===========================================================================
+
+class RerankMatchesTest(unittest.TestCase):
+    def test_disabled_uses_pinecone_order(self):
+        with patch.dict(os.environ, {"COHERE_API_KEY": "", "RERANK_ENABLED": "off"}, clear=False):
+            from server.rerank import rerank_pinecone_matches
+
+            matches = [
+                {"id": "a", "content": "first", "score": 0.5},
+                {"id": "b", "content": "second", "score": 0.9},
+            ]
+            out, applied = rerank_pinecone_matches("query", matches, top_n=1)
+        self.assertFalse(applied)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["id"], "a")
+
+    def test_cohere_reorders_by_relevance(self):
+        fake_response = types.SimpleNamespace(
+            results=[
+                types.SimpleNamespace(index=1, relevance_score=0.99),
+                types.SimpleNamespace(index=0, relevance_score=0.11),
+            ]
+        )
+        mock_client = MagicMock()
+        mock_client.rerank.return_value = fake_response
+        mock_cohere = types.SimpleNamespace(ClientV2=MagicMock(return_value=mock_client))
+
+        with patch.dict(
+            os.environ, {"COHERE_API_KEY": "test-key", "RERANK_ENABLED": "1"}, clear=False
+        ):
+            with patch.dict(sys.modules, {"cohere": mock_cohere}):
+                from server.rerank import rerank_pinecone_matches
+
+                matches = [
+                    {"id": "a", "content": "less relevant", "score": 0.9},
+                    {"id": "b", "content": "more relevant", "score": 0.5},
+                ]
+                out, applied = rerank_pinecone_matches("user query", matches, top_n=2)
+
+        self.assertTrue(applied)
+        self.assertEqual([m["id"] for m in out], ["b", "a"])
+        self.assertAlmostEqual(out[0]["score"], 0.99)
+        mock_client.rerank.assert_called_once()
+        call_kw = mock_client.rerank.call_args.kwargs
+        self.assertEqual(call_kw["top_n"], 2)
 
 
 # ===========================================================================
@@ -615,6 +723,47 @@ class ChatEndpointSourcesTest(unittest.TestCase):
         self.assertEqual(body["meta"]["sourceCount"], 2)
         self.assertEqual(body["meta"]["retrieveCount"], 5)
         self.assertEqual(body["meta"]["ragPromptK"], 2)
+
+    def test_rerank_meta_when_applied(self):
+        user_doc = {"challenges": [], "dailyNotes": {}}
+        fake_matches = [
+            {
+                "id": f"uid-note-{i}",
+                "score": 0.5,
+                "content": f"Note {i}",
+                "metadata": {"type": "note"},
+            }
+            for i in range(3)
+        ]
+        reranked = list(reversed(fake_matches))
+        with _stub_verified_uid("uid-rerank", email_verified=True):
+            with patch("server.routes.chat.firestore.Client") as mock_fs:
+                mock_fs.return_value.collection.return_value.document.return_value.get.return_value = (
+                    types.SimpleNamespace(exists=True, to_dict=lambda: user_doc)
+                )
+                with patch("server.routes.chat.needs_semantic_retrieval", return_value=True):
+                    with patch(
+                        "server.routes.chat._pinecone_matches_for_user",
+                        return_value=fake_matches,
+                    ):
+                        with patch(
+                            "server.routes.chat.rerank_pinecone_matches",
+                            return_value=(reranked, True),
+                        ):
+                            with patch(
+                                "server.routes.chat.generate_chat_reply", return_value="ok"
+                            ):
+                                with patch(
+                                    "server.routes.chat.rerank_enabled", return_value=True
+                                ):
+                                    r = self.client.post(
+                                        "/api/chat-assistant",
+                                        json={"message": "what did I write"},
+                                        headers={"Authorization": "Bearer fake"},
+                                    )
+        body = r.get_json()
+        self.assertTrue(body["meta"]["rerankEnabled"])
+        self.assertTrue(body["meta"]["rerankConfigured"])
 
 
 if __name__ == "__main__":

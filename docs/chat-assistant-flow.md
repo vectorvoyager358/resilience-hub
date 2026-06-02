@@ -168,11 +168,12 @@ Order inside **`chat_assistant`** (`server/routes/chat.py`):
 5. **Firestore** `users/{uid}` → **`404`** `user_not_found` if missing.
 6. **`build_assistant_facts(user_doc)`** and **`prompt_context_json(user_doc)`**.
 7. **`needs_semantic_retrieval(message)`** → if true, **Pinecone path** (embed + query with **`RAG_RETRIEVE_K`**, default 24).
-8. Keep the top **`RAG_PROMPT_K`** matches (default 8) for **`rag_block`**, **`sources`**, and the model prompt.
-9. **`_build_system_prompt`** → single string.
-10. Optional **logging** of prompt sizes / preview / full prompt (see `.env.example`: `CHAT_LOG_*`, `LOG_LEVEL`).
-11. **`generate_chat_reply(prompt)`** → **`503`** `model_unavailable` on configured Gemini errors.
-12. Return **`200`** JSON: **`reply`**, **`sources`**, **`meta`** (see below).
+8. Optionally **Cohere Rerank** (`server/rerank.py`): re-score up to **`RAG_RETRIEVE_K`** candidates, keep top **`RAG_PROMPT_K`** for **`rag_block`**, **`sources`**, and the model prompt.
+9. If rerank is off or fails, use the first **`RAG_PROMPT_K`** matches in Pinecone order.
+10. **`_build_system_prompt`** → single string.
+11. Optional **logging** of prompt sizes / preview / full prompt (see `.env.example`: `CHAT_LOG_*`, `LOG_LEVEL`).
+12. **`generate_chat_reply(prompt)`** → **`503`** `model_unavailable` on configured Gemini errors.
+13. Return **`200`** JSON: **`reply`**, **`sources`**, **`meta`** (see below).
 
 ---
 
@@ -203,6 +204,8 @@ Built by **`matches_to_sources`** from the **prompt slice** (top **`RAG_PROMPT_K
 | **`retrieveCount`** | Raw Pinecone match count (≤ **`ragRetrieveK`**). |
 | **`ragRetrieveK`** / **`ragPromptK`** | Config used for this request (0 when RAG off). |
 | **`promptVersion`** | Template id for the system prompt (default **`chat_v1`**, file `server/prompts/chat_v1.txt`). |
+| **`rerankEnabled`** | **`true`** when Cohere rerank ran and re-ordered this request’s prompt slice. |
+| **`rerankConfigured`** | **`true`** when `COHERE_API_KEY` is set and `RERANK_ENABLED` is not off. |
 
 So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index returned no rows or Pinecone was skipped due to missing env / failure (matches empty).
 
@@ -231,6 +234,9 @@ See **`.env.example`** for the authoritative list. Commonly relevant for this fl
 - **`RAG_RETRIEVE_K`** — Pinecone `top_k` (default `24`).
 - **`RAG_PROMPT_K`** — how many retrieved chunks go into the prompt and `sources[]` (default `8`; capped by retrieve K).
 - **`CHAT_PROMPT_VERSION`** — prompt template name (default `chat_v1` → `server/prompts/chat_v1.txt`).
+- **`COHERE_API_KEY`** — required for reranking when enabled.
+- **`RERANK_ENABLED`** — `1` / `0` (default: on when `COHERE_API_KEY` is set).
+- **`RERANK_MODEL`** — Cohere rerank model (default `rerank-v3.5`).
 
 ---
 

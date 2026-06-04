@@ -193,7 +193,7 @@ Built by **`matches_to_sources`** from the **prompt slice** (top **`RAG_PROMPT_K
 | **`score`** | Rerank or similarity score, or `null` |
 
 - **RAG off:** `sources` is `[]`.
-- **RAG on, no matches:** `sources` is `[]` (prompt still has the empty-memory placeholder).
+- **RAG on, no matches:** `sources` is `[]`; prompt uses the **facts-only** fragment (`server/prompts/rag_empty_facts_only.txt`) so the model must not invent journal quotes or `[n]` citations.
 
 ### `meta`
 
@@ -208,8 +208,9 @@ Built by **`matches_to_sources`** from the **prompt slice** (top **`RAG_PROMPT_K
 | **`rerankEnabled`** | **`true`** when Cohere rerank ran and re-ordered this request’s prompt slice. |
 | **`rerankConfigured`** | **`true`** when `COHERE_API_KEY` is set and `RERANK_ENABLED` is not off. |
 | **`citationsEnabled`** | **`true`** when RAG returned at least one memory in the prompt slice. |
+| **`groundingMode`** | **`rag`** when numbered memories are in the prompt; **`facts_only`** otherwise (including RAG requested but empty, or RAG not used). |
 
-So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index returned no rows or Pinecone was skipped due to missing env / failure (matches empty).
+So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index returned no rows or Pinecone was skipped due to missing env / failure (matches empty). In that case **`groundingMode`** is **`facts_only`** and the model is instructed to answer from Authoritative facts + Rich context only, with a warm note if indexed memories are missing.
 
 ---
 

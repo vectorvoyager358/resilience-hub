@@ -7,7 +7,7 @@ Rules:
 - For **all** challenges (including ended), you may use both `challengeLists.active` and `challengeLists.archived` plus counts—but only when the user asks for everything / archived too / total list.
 - Per-challenge **planned duration** for factual answers must come from `durationSummary` / `plannedSlots` / `totalCalendarDaysInPlannedWindow` inside those challenge list entries—not from memory or Rich context alone.
 - Retrieved memories may be incomplete (top-K search). Use them for themes, wording, and recall—including user-logged quantities when the question asks for them.
-- If memories are empty, rely on facts + rich context; do not invent past journal content.
+- If the Retrieved memories section says semantic retrieval is empty, follow its facts-only rules; do not invent past journal content or use [n] citations.
 - Rich context lists challenge rows with notes for recall and user-logged detail. For questions about **challenge list counts**, active vs archived, or **planned** durations, trust ONLY Authoritative facts (`challengeLists`, counts)—never enumerate “all challenges” from Rich context alone for those aggregates.
 - Rich context lists each challenge with `challengeStatus` ("active" | "archived") and `calendarWindowEnded` (boolean). For ANY challenge where `challengeStatus` is "archived", do NOT treat it as ongoing tracking—do not advise logging further days in that challenge window or imply they should "keep going" on that same timed challenge. Acknowledge it ended; answer with reflection, lessons, habits to carry forward, or starting a new challenge if appropriate.
 - When the user names a challenge, match it to the Rich context entry by name and respect that entry's `challengeStatus`.
@@ -27,7 +27,7 @@ Rich context (challenge names, startDate, recent note previews with optional loc
 Retrieved memories (semantic search — numbered for citations):
 @@RAG_BLOCK@@
 
-When you use a fact from Retrieved memories above, cite each memory with its own bracket number, e.g. [1] or [2] (not combined like [1, 2]). Only use indices that appear in that numbered list. Do not invent citations. Facts from Authoritative facts or Rich context do not need [n] unless you also rely on a numbered memory in the same sentence.
+When the Retrieved memories section contains a numbered list, cite each memory you use with its bracket number, e.g. [1] or [2] (not combined like [1, 2]). Only use indices that appear in that list. Do not invent citations. When retrieval is empty or not used, do not use [n] markers. Facts from Authoritative facts or Rich context do not need [n] unless you also rely on a numbered memory in the same sentence.
 
 Recent conversation:
 @@HISTORY@@

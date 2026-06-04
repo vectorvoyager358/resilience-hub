@@ -468,7 +468,7 @@ class ChatPromptTemplateTest(unittest.TestCase):
         prompt, version = render_chat_system_prompt(
             facts_json='{"activeCount": 1}',
             context_json='{"challenges": []}',
-            rag_block="(No matching indexed memories.)",
+            rag_block="(Semantic retrieval was not used for this question.)",
             history_lines="(none)",
             user_message="Hello coach",
         )
@@ -476,7 +476,41 @@ class ChatPromptTemplateTest(unittest.TestCase):
         self.assertIn("personal resilience coach", prompt)
         self.assertIn('"activeCount": 1', prompt)
         self.assertIn("Hello coach", prompt)
-        self.assertIn("(No matching indexed memories.)", prompt)
+        self.assertIn("Semantic retrieval was not used", prompt)
+
+
+class GroundingModeTest(unittest.TestCase):
+    """Facts-only when RAG requested but retrieval empty (#75)."""
+
+    def test_resolve_grounding_mode(self):
+        from server.prompt_loader import resolve_grounding_mode
+
+        self.assertEqual(
+            resolve_grounding_mode(rag_requested=True, has_prompt_matches=True),
+            "rag",
+        )
+        self.assertEqual(
+            resolve_grounding_mode(rag_requested=True, has_prompt_matches=False),
+            "facts_only",
+        )
+        self.assertEqual(
+            resolve_grounding_mode(rag_requested=False, has_prompt_matches=False),
+            "facts_only",
+        )
+
+    def test_rag_empty_fragment_forbids_invented_quotes(self):
+        from server.prompt_loader import rag_block_for_grounding
+
+        block = rag_block_for_grounding(rag_requested=True, has_matches=False)
+        self.assertIn("SEMANTIC RETRIEVAL EMPTY", block)
+        self.assertIn("Do NOT quote", block)
+        self.assertIn("Do NOT use citation markers", block)
+
+    def test_rag_not_requested_fragment(self):
+        from server.prompt_loader import rag_block_for_grounding
+
+        block = rag_block_for_grounding(rag_requested=False, has_matches=False)
+        self.assertIn("Semantic retrieval was not used", block)
 
 
 # ===========================================================================
@@ -787,6 +821,44 @@ class ChatEndpointSourcesTest(unittest.TestCase):
         body = r.get_json()
         self.assertTrue(body["meta"]["rerankEnabled"])
         self.assertTrue(body["meta"]["rerankConfigured"])
+
+    def test_facts_only_when_rag_empty(self):
+        """Memory-style query + empty Pinecone → facts_only grounding, no citations."""
+        user_doc = {"challenges": [], "dailyNotes": {}}
+        captured_prompt: list[str] = []
+
+        def capture_prompt(prompt: str) -> str:
+            captured_prompt.append(prompt)
+            return "I could not find matching memories, but you have 0 active challenges."
+
+        with _stub_verified_uid("uid-empty-rag", email_verified=True):
+            with patch("server.routes.chat.firestore.Client") as mock_fs:
+                mock_fs.return_value.collection.return_value.document.return_value.get.return_value = (
+                    types.SimpleNamespace(exists=True, to_dict=lambda: user_doc)
+                )
+                with patch("server.routes.chat.needs_semantic_retrieval", return_value=True):
+                    with patch(
+                        "server.routes.chat._pinecone_matches_for_user", return_value=[]
+                    ):
+                        with patch(
+                            "server.routes.chat.generate_chat_reply",
+                            side_effect=capture_prompt,
+                        ):
+                            r = self.client.post(
+                                "/api/chat-assistant",
+                                json={"message": "what did I write about running"},
+                                headers={"Authorization": "Bearer fake"},
+                            )
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertEqual(body.get("sources"), [])
+        self.assertFalse(body["meta"]["usedRag"])
+        self.assertTrue(body["meta"]["ragRequested"])
+        self.assertEqual(body["meta"]["groundingMode"], "facts_only")
+        self.assertFalse(body["meta"]["citationsEnabled"])
+        self.assertEqual(len(captured_prompt), 1)
+        self.assertIn("SEMANTIC RETRIEVAL EMPTY", captured_prompt[0])
+        self.assertIn("Do NOT quote", captured_prompt[0])
 
 
 if __name__ == "__main__":

@@ -24,12 +24,33 @@ def chat_prompt_version() -> str:
     return raw or _DEFAULT_VERSION
 
 
+@lru_cache(maxsize=8)
+def _load_prompt_fragment(name: str) -> str:
+    path = _PROMPTS_DIR / name
+    if not path.is_file():
+        raise FileNotFoundError(f"Chat prompt fragment not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+
 @lru_cache(maxsize=4)
 def _load_template(version: str) -> str:
-    path = _PROMPTS_DIR / f"{version}.txt"
-    if not path.is_file():
-        raise FileNotFoundError(f"Chat prompt template not found: {path}")
-    return path.read_text(encoding="utf-8")
+    return _load_prompt_fragment(f"{version}.txt")
+
+
+def rag_block_for_grounding(*, rag_requested: bool, has_matches: bool) -> str:
+    """Build the Retrieved memories section (#75)."""
+    if not rag_requested:
+        return _load_prompt_fragment("rag_not_requested.txt")
+    if has_matches:
+        return ""  # caller supplies numbered block
+    return _load_prompt_fragment("rag_empty_facts_only.txt")
+
+
+def resolve_grounding_mode(*, rag_requested: bool, has_prompt_matches: bool) -> str:
+    """API meta: rag when memories are in the prompt; otherwise facts_only."""
+    if rag_requested and has_prompt_matches:
+        return "rag"
+    return "facts_only"
 
 
 def render_chat_system_prompt(

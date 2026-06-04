@@ -15,7 +15,11 @@ from server.chat_context import prompt_context_json
 from server.firebase_util import init_firebase_admin, verify_bearer_uid_and_email_verified
 from server.gemini_client import generate_chat_reply
 from server.intent_chat import needs_semantic_retrieval
-from server.prompt_loader import render_chat_system_prompt
+from server.prompt_loader import (
+    rag_block_for_grounding,
+    render_chat_system_prompt,
+    resolve_grounding_mode,
+)
 from server.rate_limit import TokenBucketLimiter
 from server.rerank import rerank_enabled, rerank_pinecone_matches
 
@@ -208,8 +212,6 @@ def _pinecone_matches_for_user(uid: str, query_text: str, top_k: int) -> List[Di
 
 def _format_numbered_rag_block(matches: List[Dict[str, Any]]) -> str:
     """Numbered list for citation markers [1], [2] aligned with sources[].index."""
-    if not matches:
-        return "(No matching indexed memories.)"
     lines: List[str] = []
     for i, match in enumerate(matches, start=1):
         md = match.get("metadata") or {}
@@ -327,7 +329,17 @@ def chat_assistant():
                 message, matches, top_n=prompt_k
             )
 
-        rag_block = _format_numbered_rag_block(prompt_matches)
+        grounding_mode = resolve_grounding_mode(
+            rag_requested=use_rag,
+            has_prompt_matches=bool(prompt_matches),
+        )
+        if use_rag and prompt_matches:
+            rag_block = _format_numbered_rag_block(prompt_matches)
+        else:
+            rag_block = rag_block_for_grounding(
+                rag_requested=use_rag,
+                has_matches=bool(prompt_matches),
+            )
         history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
 
         prompt, prompt_version = _build_system_prompt(
@@ -348,6 +360,13 @@ def chat_assistant():
             use_rag=use_rag,
             match_count=len(prompt_matches),
             history_turns=len(history),
+        )
+        logger.info(
+            "chat_assistant grounding uid=%s mode=%s rag_requested=%s prompt_match_count=%d",
+            uid,
+            grounding_mode,
+            use_rag,
+            len(prompt_matches),
         )
 
         try:
@@ -373,6 +392,7 @@ def chat_assistant():
                     "rerankEnabled": bool(use_rag and rerank_applied),
                     "rerankConfigured": rerank_enabled(),
                     "citationsEnabled": bool(use_rag and prompt_matches),
+                    "groundingMode": grounding_mode,
                 },
             }
         )

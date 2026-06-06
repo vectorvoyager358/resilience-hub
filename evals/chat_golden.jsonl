@@ -1,0 +1,5 @@
+{"id": "rag-001", "message": "What did I write about my setbacks last time?", "history": [], "expect_rag": true, "notes": "Memory-style recall; should route to semantic retrieval (Pinecone)."}
+{"id": "rag-002", "message": "Summarize my notes from the past week.", "history": [], "expect_rag": true, "notes": "Cross-note synthesis over journal/challenge text."}
+{"id": "facts-001", "message": "How many challenges do I have?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Count must come from authoritative facts JSON, not retrieved memories."}
+{"id": "facts-002", "message": "What percent complete am I?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Progress stats belong in facts; no semantic search needed."}
+{"id": "general-001", "message": "How can I stay motivated?", "history": [], "expect_rag": false, "notes": "Generic coaching; facts + rich context only, no memory retrieval."}

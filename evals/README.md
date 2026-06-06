@@ -2,7 +2,7 @@
 
 Golden cases for **Production RAG** quality checks on the Resilience Hub chat assistant.
 
-This folder is **scaffold only** ([#77](https://github.com/vectorvoyager358/resilience-hub/issues/77)): schema + starter rows. The offline runner ([#79](https://github.com/vectorvoyager358/resilience-hub/issues/79)) and CI gate ([#89](https://github.com/vectorvoyager358/resilience-hub/issues/89)) come later.
+Golden dataset scaffold ([#77](https://github.com/vectorvoyager358/resilience-hub/issues/77)) with **20+ routing and rules cases** ([#78](https://github.com/vectorvoyager358/resilience-hub/issues/78)). The offline runner ([#79](https://github.com/vectorvoyager358/resilience-hub/issues/79)) and CI gate ([#89](https://github.com/vectorvoyager358/resilience-hub/issues/89)) come later.
 
 ## Files
 
@@ -60,7 +60,17 @@ The runner will:
 2. Assert `needs_semantic_retrieval(message)` matches `expect_rag`
 3. Optionally assert rule tags (`forbid_stats_from_memories`, etc.) with mocked Firestore/Gemini
 
-Today, overlapping routing cases live in `tests/backend/test_chat.py` (`RagRoutingTest`). The golden file is the **portable, growable** set for eval tooling and nightly jobs ([#88](https://github.com/vectorvoyager358/resilience-hub/issues/88)).
+`tests/backend/test_chat.py` includes `RagRoutingTest` (unit cases) and `GoldenEvalDatasetTest` (loads this file and asserts `expect_rag` matches `needs_semantic_retrieval`). The golden file is the **portable, growable** set for eval tooling and nightly jobs ([#88](https://github.com/vectorvoyager358/resilience-hub/issues/88)).
+
+### Current coverage (30 rows)
+
+| Tag | Count | Description |
+|-----|-------|-------------|
+| `rag-*` | 16 | Memory / journal / note recall → `expect_rag: true` |
+| `facts-*` | 12 | Counts, durations, breakdowns → `expect_rag: false` + `forbid_stats_from_memories` |
+| `general-*` | 2 | Coaching with no RAG or aggregate stats |
+
+One row (`facts-fixture-001`) includes a synthetic `fixture_user_doc` for future end-to-end prompt checks.
 
 ## Cost warnings
 

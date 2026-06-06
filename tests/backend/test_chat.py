@@ -2,6 +2,7 @@
 
 Coverage:
   1. needs_semantic_retrieval() — RAG routing for a golden set of prompts.
+  1b. evals/chat_golden.jsonl   — golden dataset rows match routing (#78).
   2. _sanitize_chat_payload()   — input truncation and history capping.
   2b. matches_to_sources()      — API citation shape.
   2c. rag_k_limits()            — RAG_RETRIEVE_K / RAG_PROMPT_K.
@@ -14,13 +15,18 @@ Coverage:
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
 import types
 import unittest
 from datetime import date
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
+
+
+_GOLDEN_EVAL_PATH = Path(__file__).resolve().parents[2] / "evals" / "chat_golden.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +160,54 @@ class RagRoutingTest(unittest.TestCase):
 
     def test_whitespace_only(self):
         self.assertFalse(self.rag("   "))
+
+
+class GoldenEvalDatasetTest(unittest.TestCase):
+    """evals/chat_golden.jsonl rows align with needs_semantic_retrieval (#78)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rows: list[dict] = []
+        text = _GOLDEN_EVAL_PATH.read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            row = json.loads(stripped)
+            row["_line"] = line_no
+            cls.rows.append(row)
+
+    def test_dataset_has_at_least_twenty_cases(self):
+        self.assertGreaterEqual(len(self.rows), 20)
+
+    def test_each_row_has_required_fields(self):
+        required = {"id", "message", "history", "expect_rag", "notes"}
+        for row in self.rows:
+            with self.subTest(row_id=row.get("id"), line=row["_line"]):
+                self.assertTrue(required <= row.keys(), msg=f"missing keys in {row.get('id')}")
+                self.assertIsInstance(row["history"], list)
+                self.assertIsInstance(row["expect_rag"], bool)
+
+    def test_expect_rag_matches_router(self):
+        from server.intent_chat import needs_semantic_retrieval
+
+        for row in self.rows:
+            with self.subTest(row_id=row["id"], line=row["_line"]):
+                self.assertEqual(
+                    needs_semantic_retrieval(row["message"]),
+                    row["expect_rag"],
+                    msg=row["message"],
+                )
+
+    def test_facts_rows_tag_forbid_stats_when_applicable(self):
+        """Rows with aggregate/stat phrasing should declare forbid_stats_from_memories."""
+        for row in self.rows:
+            if row["expect_rag"]:
+                continue
+            if not row.get("forbid_stats_from_memories"):
+                continue
+            with self.subTest(row_id=row["id"]):
+                self.assertFalse(row["expect_rag"])
 
 
 # ===========================================================================

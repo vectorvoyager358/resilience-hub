@@ -1,5 +1,30 @@
 {"id": "rag-001", "message": "What did I write about my setbacks last time?", "history": [], "expect_rag": true, "notes": "Memory-style recall; should route to semantic retrieval (Pinecone)."}
 {"id": "rag-002", "message": "Summarize my notes from the past week.", "history": [], "expect_rag": true, "notes": "Cross-note synthesis over journal/challenge text."}
+{"id": "rag-003", "message": "What did I say about my sleep challenge?", "history": [], "expect_rag": true, "notes": "Paraphrase recall from challenge notes."}
+{"id": "rag-004", "message": "Remember when I struggled with meditation?", "history": [], "expect_rag": true, "notes": "Episodic memory phrasing."}
+{"id": "rag-005", "message": "What are the themes in my journal?", "history": [], "expect_rag": true, "notes": "Theme extraction over daily reflections."}
+{"id": "rag-006", "message": "What happened last time I skipped a day?", "history": [], "expect_rag": true, "notes": "Past-behavior recall from notes."}
+{"id": "rag-007", "message": "What are my reflections about stress?", "history": [], "expect_rag": true, "notes": "Topic-specific reflection search."}
+{"id": "rag-008", "message": "How do I feel about my progress?", "history": [], "expect_rag": true, "notes": "Sentiment / self-report in past notes."}
+{"id": "rag-009", "message": "Show me my journal entries.", "history": [], "expect_rag": true, "notes": "Explicit journal browse intent."}
+{"id": "rag-010", "message": "What have I written about running?", "history": [], "expect_rag": true, "notes": "Topic recall across notes."}
+{"id": "rag-011", "message": "How much did I spend on Instagram yesterday?", "history": [], "expect_rag": true, "notes": "Quantitative recall from a specific day (memory beats aggregate-fact router)."}
+{"id": "rag-012", "message": "What did I write about anxiety last month?", "history": [], "expect_rag": true, "notes": "Time-bounded memory query (extended beyond RagRoutingTest)."}
+{"id": "rag-013", "message": "Summarize my journal from the past month.", "history": [], "expect_rag": true, "notes": "Longer-window journal synthesis."}
+{"id": "rag-014", "message": "Remember what I wrote about cold showers?", "history": [], "expect_rag": true, "notes": "Remember + wrote-about pattern."}
+{"id": "rag-015", "message": "Show me what I wrote yesterday about Instagram.", "history": [], "expect_rag": true, "notes": "Yesterday + wrote-about; day-specific note recall."}
+{"id": "rag-hist-001", "message": "What did I say about my sleep challenge?", "history": [{"role": "user", "content": "Summarize my notes from the past week."}, {"role": "assistant", "content": "You mentioned sleeping better after reducing screen time."}], "expect_rag": true, "notes": "Multi-turn case; routing uses current message only (history for future prompt evals)."}
 {"id": "facts-001", "message": "How many challenges do I have?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Count must come from authoritative facts JSON, not retrieved memories."}
 {"id": "facts-002", "message": "What percent complete am I?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Progress stats belong in facts; no semantic search needed."}
+{"id": "facts-003", "message": "What is the total count of my challenges?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Total count phrasing; facts-only routing."}
+{"id": "facts-004", "message": "List all my challenges.", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Enumerate challenges from facts snapshot."}
+{"id": "facts-005", "message": "What is the planned duration for my running challenge?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Duration metadata lives on challenge records in facts."}
+{"id": "facts-006", "message": "Give me a breakdown by cadence.", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Aggregate breakdown; skip Pinecone."}
+{"id": "facts-007", "message": "Show active and archived challenges.", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Active vs archived split from facts."}
+{"id": "facts-008", "message": "How long is my Spanish challenge?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "How-long / duration pattern; facts-only."}
+{"id": "facts-009", "message": "What's my streak on No Hot Shower?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Streak is computed from facts, not semantic memories."}
+{"id": "facts-010", "message": "What is each challenge's completion rate?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Per-challenge stats; each-challenge aggregate pattern."}
+{"id": "facts-011", "message": "How many days have I logged for Learn spanish?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Logged-day count from challenge progress in facts."}
+{"id": "facts-fixture-001", "message": "How many active challenges do I have?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "fixture_user_doc": {"name": "Eval User", "timezone": "UTC", "challenges": [{"id": "c1", "name": "No Hot Shower", "startDate": "2026-01-01T12:00:00.000Z", "duration": 30, "cadence": "daily", "completedDays": 6, "notes": {}}, {"id": "c2", "name": "Learn spanish", "startDate": "2026-01-01T12:00:00.000Z", "duration": 150, "cadence": "daily", "completedDays": 5, "notes": {}}], "dailyNotes": {}}, "notes": "Synthetic user fixture; future runner can assert reply cites 2 active challenges from facts."}
 {"id": "general-001", "message": "How can I stay motivated?", "history": [], "expect_rag": false, "notes": "Generic coaching; facts + rich context only, no memory retrieval."}
+{"id": "general-002", "message": "Give me a tip for building habits.", "history": [], "expect_rag": false, "notes": "General advice; no memory or aggregate-fact patterns."}

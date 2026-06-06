@@ -78,7 +78,7 @@ flowchart TB
 2. **Chat path**: **`/api/chat-assistant`** (`server/routes/chat.py`) verifies the Firebase bearer token, builds **structured context** from Firestore (`server/assistant_facts.py`), and when **`needs_semantic_retrieval`** says the question needs note-level grounding, runs **embed + Pinecone query** (`_pinecone_matches_for_user`) for top-k chunks. Retrieved text is merged into the prompt; **Gemini** generates the reply (`server/gemini_client.py`).
 3. **Safety and ops**: **Token-bucket rate limits** protect Pinecone, embed, and chat routes; **CORS** is origin-locked for credentialed browser calls; **`GEMINI_API_KEY`** and **`PINECONE_API_KEY`** never ship in frontend env vars.
 
-For a fuller step-by-step (prompt layers, RAG vs no-RAG), see [`docs/chat-assistant-flow.md`](docs/chat-assistant-flow.md).
+For a fuller step-by-step (prompt layers, RAG vs no-RAG), see [`docs/chat-assistant-flow.md`](docs/chat-assistant-flow.md). For **how notes are indexed** (current one-vector-per-write vs planned chunking), see [`docs/rag-indexing.md`](docs/rag-indexing.md).
 
 If Pinecone or the API is down, **Firestore-backed tracking** in the client can still operate; **RAG enrichment** is the optional upgrade path.
 
@@ -173,7 +173,7 @@ Vite defaults to **5173** and proxies **`/api`** to **`http://localhost:5001`** 
 
 Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backend` (Python), `tests/e2e` (Playwright).
 
-More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/push-reminders.md`, and `docs/weather-dashboard.md`).
+More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/rag-indexing.md`, `docs/push-reminders.md`, `docs/weather-dashboard.md`, and `docs/portfolio-roadmap.md`).
 
 ## Environment variables reference
 

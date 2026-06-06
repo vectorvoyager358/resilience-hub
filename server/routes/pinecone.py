@@ -15,6 +15,12 @@ from typing import Any, Dict, Tuple
 from flask import Blueprint, jsonify, request
 
 from server.auth_util import require_uid
+from server.index_content import (
+    chunk_vector_id_prefix,
+    delete_vectors_by_id_prefix,
+    index_content_chunks,
+    parent_id_for,
+)
 from server.rate_limit import TokenBucketLimiter
 
 logger = logging.getLogger(__name__)
@@ -69,7 +75,19 @@ def _coerce_vector(raw: Any) -> Tuple[bool, list[float] | str]:
 def _sanitize_metadata(raw: Any, uid: str) -> Tuple[bool, Dict[str, Any] | str]:
     if not isinstance(raw, dict):
         return False, "metadata must be an object"
-    allowed = {"type", "challengeId", "challengeName", "dayNumber", "content", "date", "dateCreated", "completionDate"}
+    allowed = {
+        "type",
+        "challengeId",
+        "challengeName",
+        "dayNumber",
+        "content",
+        "date",
+        "dateCreated",
+        "completionDate",
+        "parent_id",
+        "chunk_index",
+        "chunk_count",
+    }
     cleaned: Dict[str, Any] = {}
     for key, value in raw.items():
         if key not in allowed:
@@ -104,15 +122,51 @@ def upsert_to_pinecone():
     try:
         data = request.get_json(silent=True) or {}
 
-        ok, vec_or_err = _coerce_vector(data.get("vector"))
-        if not ok:
-            return jsonify({"error": vec_or_err}), 400
-        vector = vec_or_err
-
         ok, md_or_err = _sanitize_metadata(data.get("metadata"), uid)
         if not ok:
             return jsonify({"error": md_or_err}), 400
         metadata = md_or_err
+
+        raw_content = data.get("content")
+        content = raw_content.strip() if isinstance(raw_content, str) else ""
+        raw_vector = data.get("vector")
+
+        # Preferred path (#76): server chunks + embeds from full content.
+        if content:
+            try:
+                vector_id, chunk_count = index_content_chunks(
+                    _get_index(),
+                    uid=uid,
+                    content=content,
+                    metadata=metadata,
+                )
+            except ValueError as e:
+                code = str(e)
+                if code == "content_empty":
+                    return jsonify({"error": "content required"}), 400
+                if code == "metadata_missing_parent_key":
+                    return jsonify({"error": "metadata_missing_parent_key"}), 400
+                raise
+            except RuntimeError as e:
+                if str(e) == "embedding_failed":
+                    logger.warning("index_content embed failed uid=%s", uid)
+                    return jsonify({"error": "embedding_failed"}), 503
+                raise
+            parent = parent_id_for(uid, metadata)
+            return jsonify(
+                {
+                    "status": "success",
+                    "vectorId": vector_id,
+                    "parentId": parent,
+                    "chunkCount": chunk_count,
+                    "message": "Content indexed",
+                }
+            )
+
+        ok, vec_or_err = _coerce_vector(raw_vector)
+        if not ok:
+            return jsonify({"error": vec_or_err}), 400
+        vector = vec_or_err
 
         vector_id = _vector_id_for(uid, metadata)
         _get_index().upsert(vectors=[(vector_id, vector, metadata)])
@@ -122,9 +176,15 @@ def upsert_to_pinecone():
             {
                 "status": "success",
                 "vectorId": vector_id,
+                "chunkCount": 1,
                 "message": "Vector successfully upserted",
             }
         )
+    except RuntimeError as e:
+        if str(e) == "embedding_failed":
+            return jsonify({"error": "embedding_failed"}), 503
+        logger.exception("pinecone upsert failed uid=%s", uid)
+        return jsonify({"error": "internal_error"}), 500
     except Exception:
         logger.exception("pinecone upsert failed uid=%s", uid)
         return jsonify({"error": "internal_error"}), 500
@@ -147,12 +207,17 @@ def delete_from_pinecone():
         data = request.get_json(silent=True) or {}
         raw_vector_id = data.get("vectorId")
         raw_prefix = data.get("prefix")
+        raw_parent_id = data.get("parentId")
 
         vector_id = raw_vector_id if isinstance(raw_vector_id, str) and raw_vector_id.strip() else None
         prefix = raw_prefix if isinstance(raw_prefix, str) and raw_prefix.strip() else None
+        parent_id = raw_parent_id if isinstance(raw_parent_id, str) and raw_parent_id.strip() else None
+
+        if parent_id and not prefix:
+            prefix = chunk_vector_id_prefix(parent_id)
 
         if not vector_id and not prefix:
-            return jsonify({"error": "vectorId or prefix required"}), 400
+            return jsonify({"error": "vectorId, prefix, or parentId required"}), 400
 
         owner_prefix = f"{uid}-"
 
@@ -170,30 +235,13 @@ def delete_from_pinecone():
                 }
             )
 
-        # Prefix delete (e.g. all notes for a challenge).
+        # Prefix delete (e.g. all chunks for one note via parentId).
         assert prefix is not None
         if not prefix.startswith(owner_prefix):
             logger.warning("pinecone delete denied (prefix not owned) uid=%s", uid)
             return jsonify({"error": "forbidden"}), 403
 
-        idx = _get_index()
-        fetch_response = idx.query(
-            vector=[0.0] * _EMBED_DIM,
-            top_k=_MAX_PREFIX_FETCH,
-            include_metadata=False,
-            filter={"user_id": uid},
-        )
-        vectors_to_delete = [
-            match.id for match in getattr(fetch_response, "matches", []) or []
-            if isinstance(getattr(match, "id", None), str) and match.id.startswith(prefix)
-        ]
-        deleted = 0
-        for i in range(0, len(vectors_to_delete), _DELETE_BATCH_SIZE):
-            batch = vectors_to_delete[i:i + _DELETE_BATCH_SIZE]
-            if not batch:
-                continue
-            idx.delete(ids=batch)
-            deleted += len(batch)
+        deleted = delete_vectors_by_id_prefix(_get_index(), uid, prefix)
 
         logger.info("pinecone delete prefix uid=%s count=%d", uid, deleted)
         return jsonify(

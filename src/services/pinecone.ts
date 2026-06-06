@@ -1,8 +1,6 @@
 import { authedPostJsonOptional } from '../api/http';
 import { Challenge, Note } from '../types';
 import { getChallengeCadence } from '../utils/challengeProgress';
-import { embedTextToVector } from '../utils/embeddings';
-
 /** Pinecone mirror only — failures must not block Firestore or UI */
 async function postUpsertPinecone(body: object): Promise<
   { ok: true; data: Record<string, unknown> } | { ok: false }
@@ -20,13 +18,11 @@ export async function upsertChallengeData(_userId: string, challenge: Challenge)
     const cadence = getChallengeCadence(challenge);
     const unit = cadence === 'weekly' ? 'weeks' : 'days';
     const summary = `Challenge: ${challenge.name} (${cadence}). Progress: ${challenge.completedDays}/${challenge.duration} ${unit}.`;
-    const vector = await embedTextToVector(summary);
     const res = await postUpsertPinecone({
-      vector,
+      content: summary,
       metadata: {
         type: 'challenge',
         challengeId: challenge.id,
-        content: summary,
         date: new Date().toISOString(),
       },
     });
@@ -46,15 +42,13 @@ export async function upsertNoteData(
 ): Promise<{ vectorId?: string }> {
   try {
     const noteContent = typeof note === 'string' ? note : note.content;
-    const vector = await embedTextToVector(noteContent);
 
     const res = await postUpsertPinecone({
-      vector,
+      content: noteContent,
       metadata: {
         type: 'note',
         challengeId,
         dayNumber,
-        content: noteContent,
         date: new Date().toISOString(),
       },
     });
@@ -74,13 +68,11 @@ export async function upsertDailyReflection(
   reflection: string
 ): Promise<void> {
   try {
-    const vector = await embedTextToVector(reflection);
     const res = await postUpsertPinecone({
-      vector,
+      content: reflection,
       metadata: {
         type: 'reflection',
         date,
-        content: reflection,
         dateCreated: new Date().toISOString(),
       },
     });

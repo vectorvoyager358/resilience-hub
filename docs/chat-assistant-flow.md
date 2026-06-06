@@ -65,7 +65,7 @@ flowchart TB
   O --> P --> Q
 ```
 
-**Vector writes (separate from this read path):** the app gets **768-dim embeddings** from **`POST /api/embed`** (server-side Gemini), then sends vectors to Pinecone via authenticated **`POST /api/upsert-pinecone`** (and deletes via **`/api/delete-pinecone`**). The chat route **reads** Pinecone only when RAG is selected (embed + query on the server).
+**Vector writes (separate from this read path):** the app gets **768-dim embeddings** from **`POST /api/embed`** (server-side Gemini), then sends vectors to Pinecone via authenticated **`POST /api/upsert-pinecone`** (and deletes via **`/api/delete-pinecone`**). The chat route **reads** Pinecone only when RAG is selected (embed + query on the server). For **one-vector-per-note today vs planned chunking**, see [`rag-indexing.md`](rag-indexing.md).
 
 ---
 

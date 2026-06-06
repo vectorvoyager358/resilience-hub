@@ -1,6 +1,4 @@
 import { authedPostJsonOrThrow } from '../api/http';
-import { embedTextToVector } from './embeddings';
-
 type DeleteFromPineconeParams = {
   userId?: string;
   type?: "challenge" | "note" | "reflection";
@@ -8,7 +6,32 @@ type DeleteFromPineconeParams = {
   dayNumber?: number;
   vectorId?: string;
   prefix?: string;
+  /** Stable logical id — deletes all chunk vectors `{parentId}-c*`. */
+  parentId?: string;
 };
+
+/** Must match server `parent_id_for` in server/index_content.py */
+export function pineconeNoteParentId(
+  uid: string,
+  challengeId: string,
+  dayNumber: number
+): string {
+  return `${uid}-note-${challengeId}-${dayNumber}`;
+}
+
+export function pineconeReflectionParentId(uid: string, date: string): string {
+  return `${uid}-reflection-${date}`;
+}
+
+export function pineconeChallengeParentId(uid: string, challengeId: string): string {
+  return `${uid}-challenge-${challengeId}`;
+}
+
+/** Server rejects delete when vectorId does not start with `{uid}-`. */
+export function isOwnedPineconeVectorId(uid: string, vectorId: string): boolean {
+  const id = vectorId.trim();
+  return id.length > 0 && id.startsWith(`${uid}-`);
+}
 
 export const upsertToPinecone = async (data: {
   userId: string;
@@ -17,11 +40,10 @@ export const upsertToPinecone = async (data: {
   metadata: Record<string, unknown>;
 }) => {
   const payload = {
-    vector: await embedTextToVector(data.content),
+    content: data.content,
     metadata: {
       ...data.metadata,
       type: data.type,
-      content: data.content,
       dayNumber: data.metadata.dayNumber,
       challengeId: data.metadata.challengeId,
     },
@@ -63,15 +85,17 @@ export async function tryDeleteFromPinecone(params: DeleteFromPineconeParams): P
 }
 
 export const deleteFromPinecone = async (params: DeleteFromPineconeParams) => {
-  const requestBody: { vectorId?: string; prefix?: string } = params.vectorId
+  const requestBody: { vectorId?: string; prefix?: string; parentId?: string } = params.vectorId
     ? { vectorId: params.vectorId }
-    : params.prefix
-      ? { prefix: params.prefix }
-      : params.userId && params.type && params.challengeId
-        ? { prefix: `${params.userId}-${params.type}-${params.challengeId}` }
-        : (() => {
-            throw new Error('Must provide vectorId or prefix for deletion');
-          })();
+    : params.parentId
+      ? { parentId: params.parentId }
+      : params.prefix
+        ? { prefix: params.prefix }
+        : params.userId && params.type && params.challengeId
+          ? { prefix: `${params.userId}-${params.type}-${params.challengeId}` }
+          : (() => {
+              throw new Error('Must provide vectorId, parentId, or prefix for deletion');
+            })();
 
   try {
     return await authedPostJsonOrThrow<Record<string, unknown>>('/api/delete-pinecone', requestBody);
@@ -89,7 +113,8 @@ export const updatePineconeNote = async (data: {
   metadata: Record<string, unknown>;
   oldVectorId?: string;
 }) => {
-  if (data.oldVectorId) {
+  // Legacy single-vector id (pre-chunking). Chunked notes are replaced on content upsert.
+  if (data.oldVectorId && isOwnedPineconeVectorId(data.userId, data.oldVectorId)) {
     await tryDeleteFromPinecone({ vectorId: data.oldVectorId });
   }
 

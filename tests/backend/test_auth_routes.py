@@ -145,6 +145,37 @@ class OwnershipEnforcementTest(unittest.TestCase):
         body = r.get_json()
         self.assertTrue(body["vectorId"].startswith("real-uid-"))
 
+    def test_content_upsert_indexes_chunks(self):
+        long_content = ("Note text for indexing. " * 80).strip()
+        with self._with_uid("real-uid"):
+            with patch("server.gemini_client.embed_document_text", return_value=[0.0] * 768):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "RAG_CHUNK_THRESHOLD_CHARS": "400",
+                        "RAG_CHUNK_TARGET_CHARS": "500",
+                        "RAG_CHUNK_OVERLAP_CHARS": "50",
+                    },
+                    clear=False,
+                ):
+                    r = self.client.post(
+                        "/api/upsert-pinecone",
+                        json={
+                            "content": long_content,
+                            "metadata": {
+                                "type": "note",
+                                "challengeId": "c9",
+                                "dayNumber": 2,
+                            },
+                        },
+                        headers={"Authorization": "Bearer fake"},
+                    )
+        self.assertEqual(r.status_code, 200, msg=r.get_data(as_text=True))
+        body = r.get_json()
+        self.assertEqual(body["parentId"], "real-uid-note-c9-2")
+        self.assertGreater(body["chunkCount"], 1)
+        self.assertTrue(len(self.fake_index.upserts) >= 1)
+
 
 if __name__ == "__main__":
     unittest.main()

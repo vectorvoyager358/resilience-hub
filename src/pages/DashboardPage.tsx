@@ -82,7 +82,13 @@ import NotesHistoryPage from './NotesHistoryPage';
 import ClickAwayListener from '@mui/material/ClickAwayListener';
 import Fuse from 'fuse.js';
 import PeopleIcon from '@mui/icons-material/People';
-import { tryUpsertToPinecone, tryDeleteFromPinecone } from '../utils/api';
+import {
+  tryUpsertToPinecone,
+  tryDeleteFromPinecone,
+  pineconeReflectionParentId,
+  pineconeNoteParentId,
+  isOwnedPineconeVectorId,
+} from '../utils/api';
 import { authedGetJsonOptional } from '../api/http';
 import { upsertChallengeData, upsertDailyReflection } from '../services/pinecone';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -1140,7 +1146,17 @@ const DashboardPage: React.FC = () => {
         await upsertChallengeData(currentUser.uid, refreshed);
       }
 
-      if (deletedVectorId) {
+      await tryDeleteFromPinecone({
+        parentId: pineconeNoteParentId(
+          currentUser.uid,
+          logToDelete.challengeId,
+          logToDelete.day
+        ),
+      });
+      if (
+        deletedVectorId &&
+        isOwnedPineconeVectorId(currentUser.uid, deletedVectorId)
+      ) {
         await tryDeleteFromPinecone({ vectorId: deletedVectorId });
       }
 
@@ -1285,9 +1301,7 @@ const DashboardPage: React.FC = () => {
 
       // Best-effort Pinecone cleanup (don't block UI on failures / misconfig).
       await tryDeleteFromPinecone({
-        userId: currentUser.uid,
-        type: 'reflection',
-        vectorId: `reflection_${todayKey}`,
+        parentId: pineconeReflectionParentId(currentUser.uid, todayKey),
       });
     } catch (error) {
       console.error('Error deleting daily note:', error);

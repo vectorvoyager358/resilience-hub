@@ -26,20 +26,19 @@ def _client() -> genai.Client:
     return genai.Client(api_key=key)
 
 
-def embed_query_text(text: str) -> List[float]:
-    """768-dim query embedding for Pinecone RAG (matches index / client embed dimension)."""
+def _embed_text(text: str, *, task_type: str) -> List[float]:
     try:
         client = _client()
         result = client.models.embed_content(
             model=_EMBED_MODEL,
             contents=text,
             config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_QUERY",
+                task_type=task_type,
                 output_dimensionality=768,
             ),
         )
     except Exception as e:
-        logger.warning("Gemini embed failed: %s", e)
+        logger.warning("Gemini embed failed (%s): %s", task_type, e)
         raise RuntimeError("embedding_failed") from e
 
     if not result.embeddings:
@@ -49,6 +48,16 @@ def embed_query_text(text: str) -> List[float]:
         return [float(x) for x in emb]
 
     raise RuntimeError("embedding_failed")
+
+
+def embed_query_text(text: str) -> List[float]:
+    """768-dim query embedding for Pinecone RAG (matches index / client embed dimension)."""
+    return _embed_text(text, task_type="RETRIEVAL_QUERY")
+
+
+def embed_document_text(text: str) -> List[float]:
+    """768-dim document embedding for vectors written to Pinecone."""
+    return _embed_text(text, task_type="RETRIEVAL_DOCUMENT")
 
 
 def generate_chat_reply(prompt: str) -> str:

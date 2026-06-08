@@ -169,6 +169,7 @@ Vite defaults to **5173** and proxies **`/api`** to **`http://localhost:5001`** 
 - `npm run server:dev` — Flask API (`python -m server.app` via `.venv`)
 - `npm test` / `npm run test:run` — Vitest unit tests (`tests/frontend/`)
 - `npm run test:server` — Flask/Python `unittest` (`tests/backend/`; uses `.venv/bin/python` like `server:dev`, from repo root)
+- `npm run eval:chat` — offline chat golden eval (routing only, no API keys); `npm run eval:chat:mock` adds stubbed endpoint checks — see [`evals/README.md`](evals/README.md)
 - `npm run e2e` — Playwright smoke tests (`tests/e2e/`)
 
 Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backend` (Python), `tests/e2e` (Playwright).

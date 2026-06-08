@@ -41,6 +41,7 @@ firebase-debug.*.log*
 /coverage
 playwright-report/
 test-results/
+evals/reports/
 
 # Python
 __pycache__/

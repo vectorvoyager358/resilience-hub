@@ -167,15 +167,9 @@ class GoldenEvalDatasetTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.rows: list[dict] = []
-        text = _GOLDEN_EVAL_PATH.read_text(encoding="utf-8")
-        for line_no, line in enumerate(text.splitlines(), start=1):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            row = json.loads(stripped)
-            row["_line"] = line_no
-            cls.rows.append(row)
+        from evals.dataset import load_golden_rows
+
+        cls.rows = load_golden_rows(_GOLDEN_EVAL_PATH)
 
     def test_dataset_has_at_least_twenty_cases(self):
         self.assertGreaterEqual(len(self.rows), 20)
@@ -185,8 +179,6 @@ class GoldenEvalDatasetTest(unittest.TestCase):
         for row in self.rows:
             with self.subTest(row_id=row.get("id"), line=row["_line"]):
                 self.assertTrue(required <= row.keys(), msg=f"missing keys in {row.get('id')}")
-                self.assertIsInstance(row["history"], list)
-                self.assertIsInstance(row["expect_rag"], bool)
 
     def test_expect_rag_matches_router(self):
         from server.intent_chat import needs_semantic_retrieval

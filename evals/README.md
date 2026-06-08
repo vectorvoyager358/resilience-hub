@@ -2,13 +2,16 @@
 
 Golden cases for **Production RAG** quality checks on the Resilience Hub chat assistant.
 
-Golden dataset scaffold ([#77](https://github.com/vectorvoyager358/resilience-hub/issues/77)) with **20+ routing and rules cases** ([#78](https://github.com/vectorvoyager358/resilience-hub/issues/78)). The offline runner ([#79](https://github.com/vectorvoyager358/resilience-hub/issues/79)) and CI gate ([#89](https://github.com/vectorvoyager358/resilience-hub/issues/89)) come later.
+Golden dataset ([#77](https://github.com/vectorvoyager358/resilience-hub/issues/77), [#78](https://github.com/vectorvoyager358/resilience-hub/issues/78)) with **offline runner** ([#79](https://github.com/vectorvoyager358/resilience-hub/issues/79)). CI metric gates ([#89](https://github.com/vectorvoyager358/resilience-hub/issues/89)) come later.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `chat_golden.jsonl` | One JSON object per line — routing and grounding rules |
+| `dataset.py` | Load / validate JSONL rows |
+| `runner.py` | Routing + optional mocked chat checks |
+| `reports/` | JSON reports from `scripts/run_chat_eval.py` (gitignored) |
 
 ## Dataset format (JSONL)
 
@@ -42,25 +45,37 @@ Optional fields (used by later eval steps):
 }
 ```
 
-## How to run (future)
+## How to run
 
-**Not wired yet.** Planned flow ([#79](https://github.com/vectorvoyager358/resilience-hub/issues/79)):
+From repo root (uses `.venv` if present):
 
 ```bash
-# Routing-only (no Gemini, no Pinecone) — cheap, CI-safe
+# Routing-only (no Gemini, no Pinecone) — default, CI-safe
 python scripts/run_chat_eval.py
+# or
+npm run eval:chat
 
-# Optional live smoke (costs API credits — local only)
-python scripts/run_chat_eval.py --live
+# Routing + stubbed /api/chat-assistant meta checks (still no live APIs)
+python scripts/run_chat_eval.py --mock-chat
+# or
+npm run eval:chat:mock
+
+# Custom report path + per-case output
+python scripts/run_chat_eval.py --mock-chat --verbose --report evals/reports/latest.json
 ```
 
-The runner will:
+Exit code **0** = all cases passed; **1** = failures; **2** = invalid flags (e.g. `--live` not implemented).
 
-1. Load `evals/chat_golden.jsonl`
-2. Assert `needs_semantic_retrieval(message)` matches `expect_rag`
-3. Optionally assert rule tags (`forbid_stats_from_memories`, etc.) with mocked Firestore/Gemini
+The runner:
 
-`tests/backend/test_chat.py` includes `RagRoutingTest` (unit cases) and `GoldenEvalDatasetTest` (loads this file and asserts `expect_rag` matches `needs_semantic_retrieval`). The golden file is the **portable, growable** set for eval tooling and nightly jobs ([#88](https://github.com/vectorvoyager358/resilience-hub/issues/88)).
+1. Loads `evals/chat_golden.jsonl`
+2. Asserts `needs_semantic_retrieval(message)` matches `expect_rag`
+3. Validates rule tags (`forbid_stats_from_memories` vs `expect_rag`)
+4. With `--mock-chat`: POSTs each case to `/api/chat-assistant` with mocked Firestore, Pinecone, and Gemini; checks `meta.ragRequested`, `usedRag`, and `groundingMode` for RAG rows with empty retrieval
+
+Writes a JSON report under `evals/reports/` (timestamped by default).
+
+`tests/backend/test_chat.py` includes `GoldenEvalDatasetTest` (pytest/unittest parity with routing checks). `tests/backend/test_run_chat_eval.py` smoke-tests the CLI script.
 
 ### Current coverage (30 rows)
 
@@ -76,9 +91,9 @@ One row (`facts-fixture-001`) includes a synthetic `fixture_user_doc` for future
 
 | Mode | Gemini | Pinecone | When to use |
 |------|--------|----------|-------------|
-| **Routing only** (planned default) | No | No | Every PR, local dev |
-| **Mocked full chat** | No (stubbed) | No (stubbed) | CI pytest extension ([#80](https://github.com/vectorvoyager358/resilience-hub/issues/80)) |
-| **Live end-to-end** | Yes | Yes | Manual smoke, optional nightly ([#82](https://github.com/vectorvoyager358/resilience-hub/issues/82)) |
+| **Routing only** (`npm run eval:chat`) | No | No | Every PR, local dev |
+| **Mock chat** (`npm run eval:chat:mock`) | No (stubbed) | No (stubbed) | Deeper meta checks without API cost |
+| **Live end-to-end** | Yes | Yes | Not implemented — manual smoke only ([#82](https://github.com/vectorvoyager358/resilience-hub/issues/82)) |
 
 Do **not** run live evals on every save — embedding + chat tokens add up quickly.
 
@@ -86,8 +101,8 @@ Do **not** run live evals on every save — embedding + chat tokens add up quick
 
 | Step | Issue | Work |
 |------|-------|------|
-| 9 | [#77](https://github.com/vectorvoyager358/resilience-hub/issues/77) | This scaffold |
-| 10 | [#78](https://github.com/vectorvoyager358/resilience-hub/issues/78) | Grow to 20+ cases |
+| 9 | [#77](https://github.com/vectorvoyager358/resilience-hub/issues/77) | `evals/` scaffold |
+| 10 | [#78](https://github.com/vectorvoyager358/resilience-hub/issues/78) | 20+ golden cases |
 | 11 | [#79](https://github.com/vectorvoyager358/resilience-hub/issues/79) | `scripts/run_chat_eval.py` |
 | 12 | [#80](https://github.com/vectorvoyager358/resilience-hub/issues/80) | Extend pytest |
 

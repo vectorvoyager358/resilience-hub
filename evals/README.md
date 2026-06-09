@@ -104,6 +104,6 @@ Do **not** run live evals on every save — embedding + chat tokens add up quick
 | 9 | [#77](https://github.com/vectorvoyager358/resilience-hub/issues/77) | `evals/` scaffold |
 | 10 | [#78](https://github.com/vectorvoyager358/resilience-hub/issues/78) | 20+ golden cases |
 | 11 | [#79](https://github.com/vectorvoyager358/resilience-hub/issues/79) | `scripts/run_chat_eval.py` |
-| 12 | [#80](https://github.com/vectorvoyager358/resilience-hub/issues/80) | Extend pytest |
+| 12 | [#80](https://github.com/vectorvoyager358/resilience-hub/issues/80) | Extend unittest (`sources[]`, prompt assembly) |
 
 Related docs: [`docs/chat-assistant-flow.md`](../docs/chat-assistant-flow.md), [`docs/portfolio-roadmap.md`](../docs/portfolio-roadmap.md).

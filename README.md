@@ -174,6 +174,8 @@ Vite defaults to **5173** and proxies **`/api`** to **`http://localhost:5001`** 
 
 Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backend` (Python), `tests/e2e` (Playwright).
 
+**CI** (`.github/workflows/ci.yml`) runs frontend Vitest + build and backend `unittest` + offline chat eval on every push/PR — no `GEMINI_API_KEY` or Pinecone required (mocks only).
+
 More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/rag-indexing.md`, `docs/push-reminders.md`, `docs/weather-dashboard.md`, and `docs/portfolio-roadmap.md`).
 
 ## Environment variables reference

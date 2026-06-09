@@ -7,6 +7,8 @@ Coverage:
   2b. matches_to_sources()      — API citation shape.
   2c. rag_k_limits()            — RAG_RETRIEVE_K / RAG_PROMPT_K.
   2d. versioned prompts         — server/prompts + promptVersion.
+  2f. _build_system_prompt      — facts JSON + rag_block assembly (#80).
+  2g. sources[] API contract    — stable JSON keys for frontend (#80).
   3. /api/chat-assistant        — auth (401), email gate (403), rate limit (429), sources[].
      All endpoint tests stub out Firebase, Firestore, and Gemini so no live
      network calls are made.
@@ -27,6 +29,9 @@ from zoneinfo import ZoneInfo
 
 
 _GOLDEN_EVAL_PATH = Path(__file__).resolve().parents[2] / "evals" / "chat_golden.jsonl"
+
+# Stable keys returned by matches_to_sources / API sources[] (#70, #80).
+SOURCE_API_KEYS = frozenset({"index", "id", "type", "date", "snippet", "score"})
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +457,27 @@ class MatchesToSourcesTest(unittest.TestCase):
         out = self.to_sources([{"content": long_text, "metadata": {"type": "reflection"}}])
         self.assertEqual(len(out[0]["snippet"]), 320)
 
+    def test_source_objects_have_stable_api_key_set(self):
+        """Frontend ChatRetrievalSource expects this exact shape (#80)."""
+        matches = [
+            {
+                "id": "uid-reflection-2026-01-01",
+                "score": 0.77,
+                "content": "Good day.",
+                "metadata": {"type": "reflection", "date": "2026-01-01"},
+            },
+            {"content": "no id", "metadata": {}},
+        ]
+        out = self.to_sources(matches)
+        self.assertEqual(len(out), 2)
+        for src in out:
+            self.assertEqual(set(src.keys()), SOURCE_API_KEYS)
+        self.assertEqual([s["index"] for s in out], [1, 2])
+
+    def test_score_null_when_missing(self):
+        out = self.to_sources([{"content": "x", "metadata": {}}])
+        self.assertIsNone(out[0]["score"])
+
 
 class NumberedRagBlockTest(unittest.TestCase):
     """Numbered memories align with sources[].index (#74)."""
@@ -523,6 +549,70 @@ class ChatPromptTemplateTest(unittest.TestCase):
         self.assertIn('"activeCount": 1', prompt)
         self.assertIn("Hello coach", prompt)
         self.assertIn("Semantic retrieval was not used", prompt)
+
+
+class BuildSystemPromptTest(unittest.TestCase):
+    """_build_system_prompt wires assistant_facts + rag_block into chat_v1 (#80)."""
+
+    def test_includes_serialized_facts_and_rag_block(self):
+        from server.assistant_facts import build_assistant_facts
+        from server.prompt_loader import rag_block_for_grounding
+        from server.routes.chat import _build_system_prompt
+
+        user_doc = {
+            "challenges": [
+                {
+                    "id": "c1",
+                    "name": "No Hot Shower",
+                    "startDate": "2026-01-01T12:00:00.000Z",
+                    "duration": 30,
+                    "cadence": "daily",
+                    "completedDays": 3,
+                    "notes": {},
+                }
+            ],
+            "dailyNotes": {},
+        }
+        facts = build_assistant_facts(user_doc)
+        rag_block = rag_block_for_grounding(rag_requested=False, has_matches=False)
+        context_json = '{"challenges": []}'
+
+        prompt, version = _build_system_prompt(
+            assistant_facts=facts,
+            context_json=context_json,
+            rag_block=rag_block,
+            history_lines="(none)",
+            user_message="How many challenges?",
+        )
+        self.assertEqual(version, "chat_v1")
+        self.assertIn("Authoritative facts", prompt)
+        self.assertIn('"activeCount"', prompt)
+        self.assertIn("No Hot Shower", prompt)
+        self.assertIn("Semantic retrieval was not used", prompt)
+        self.assertIn('{"challenges": []}', prompt)
+        self.assertIn("How many challenges?", prompt)
+
+    def test_numbered_rag_block_embedded_in_prompt(self):
+        from server.routes.chat import _build_system_prompt, _format_numbered_rag_block
+
+        rag_block = _format_numbered_rag_block(
+            [
+                {
+                    "content": "Logged cold shower.",
+                    "metadata": {"type": "note", "date": "2026-03-01"},
+                }
+            ]
+        )
+        prompt, version = _build_system_prompt(
+            assistant_facts={"challenges": {"activeCount": 0}},
+            context_json="{}",
+            rag_block=rag_block,
+            history_lines="(none)",
+            user_message="What did I write?",
+        )
+        self.assertEqual(version, "chat_v1")
+        self.assertIn("Retrieved memories", prompt)
+        self.assertIn("[1] note (2026-03-01): Logged cold shower.", prompt)
 
 
 class GroundingModeTest(unittest.TestCase):
@@ -786,6 +876,48 @@ class ChatEndpointSourcesTest(unittest.TestCase):
         self.assertEqual(body["sources"][0]["id"], "uid-note-c1-1")
         self.assertEqual(body["sources"][0]["type"], "note")
         self.assertTrue(body["meta"]["usedRag"])
+        self.assertEqual(set(body["sources"][0].keys()), SOURCE_API_KEYS)
+        self.assertEqual(body["sources"][0]["index"], 1)
+
+    def test_prompt_sent_to_model_includes_numbered_memories(self):
+        """End-to-end: RAG matches → numbered block in Gemini prompt (#80)."""
+        user_doc = {"challenges": [], "dailyNotes": {}}
+        fake_matches = [
+            {
+                "id": "uid-note-1",
+                "score": 0.9,
+                "content": "Ran 5k in the park.",
+                "metadata": {"type": "note", "date": "2026-04-10"},
+            }
+        ]
+        captured_prompt: list[str] = []
+
+        def capture_prompt(prompt: str) -> str:
+            captured_prompt.append(prompt)
+            return "ok"
+
+        with _stub_verified_uid("uid-prompt", email_verified=True):
+            with patch("server.routes.chat.firestore.Client") as mock_fs:
+                mock_fs.return_value.collection.return_value.document.return_value.get.return_value = (
+                    types.SimpleNamespace(exists=True, to_dict=lambda: user_doc)
+                )
+                with patch("server.routes.chat.needs_semantic_retrieval", return_value=True):
+                    with patch(
+                        "server.routes.chat._pinecone_matches_for_user", return_value=fake_matches
+                    ):
+                        with patch(
+                            "server.routes.chat.generate_chat_reply",
+                            side_effect=capture_prompt,
+                        ):
+                            r = self.client.post(
+                                "/api/chat-assistant",
+                                json={"message": "what did I write about running"},
+                                headers={"Authorization": "Bearer fake"},
+                            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(captured_prompt), 1)
+        self.assertIn("[1] note (2026-04-10): Ran 5k in the park.", captured_prompt[0])
+        self.assertIn("Authoritative facts", captured_prompt[0])
 
     def test_sources_trimmed_to_prompt_k(self):
         user_doc = {"challenges": [], "dailyNotes": {}}

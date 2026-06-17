@@ -13,8 +13,9 @@ from google.cloud import firestore
 from server.assistant_facts import build_assistant_facts
 from server.chat_context import prompt_context_json
 from server.firebase_util import init_firebase_admin, verify_bearer_uid_and_email_verified
-from server.gemini_client import generate_chat_reply
+from server.gemini_client import chat_model_name, generate_chat_reply
 from server.intent_chat import needs_semantic_retrieval
+from server.langfuse_tracing import chat_trace_session
 from server.prompt_loader import (
     rag_block_for_grounding,
     render_chat_system_prompt,
@@ -308,94 +309,111 @@ def chat_assistant():
             body, code = rate_err
             return jsonify(body), code
 
-        init_firebase_admin()
-        db = firestore.Client()
-        snap = db.collection("users").document(uid).get()
-        if not snap.exists:
-            return jsonify({"error": "user_not_found"}), 404
-
-        user_doc = snap.to_dict() or {}
-        facts = build_assistant_facts(user_doc)
-        context_json = prompt_context_json(user_doc)
-
-        use_rag = needs_semantic_retrieval(message)
-        retrieve_k, prompt_k = rag_k_limits()
-        matches: List[Dict[str, Any]] = []
-        prompt_matches: List[Dict[str, Any]] = []
-        rerank_applied = False
-        if use_rag:
-            matches = _pinecone_matches_for_user(uid, message, top_k=retrieve_k)
-            prompt_matches, rerank_applied = rerank_pinecone_matches(
-                message, matches, top_n=prompt_k
-            )
-
-        grounding_mode = resolve_grounding_mode(
-            rag_requested=use_rag,
-            has_prompt_matches=bool(prompt_matches),
-        )
-        if use_rag and prompt_matches:
-            rag_block = _format_numbered_rag_block(prompt_matches)
-        else:
-            rag_block = rag_block_for_grounding(
-                rag_requested=use_rag,
-                has_matches=bool(prompt_matches),
-            )
-        history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
-
-        prompt, prompt_version = _build_system_prompt(
-            assistant_facts=facts,
-            context_json=context_json,
-            rag_block=rag_block,
-            history_lines=history_lines,
-            user_message=message,
-        )
-
-        _log_built_prompt(
+        with chat_trace_session(
             uid=uid,
-            prompt=prompt,
-            user_message=message,
-            context_json=context_json,
-            rag_block=rag_block,
-            history_lines=history_lines,
-            use_rag=use_rag,
-            match_count=len(prompt_matches),
+            message=message,
             history_turns=len(history),
-        )
-        logger.info(
-            "chat_assistant grounding uid=%s mode=%s rag_requested=%s prompt_match_count=%d",
-            uid,
-            grounding_mode,
-            use_rag,
-            len(prompt_matches),
-        )
+        ) as trace:
+            init_firebase_admin()
+            db = firestore.Client()
+            snap = db.collection("users").document(uid).get()
+            if not snap.exists:
+                trace.fail(status_code=404, error="user_not_found")
+                return jsonify({"error": "user_not_found"}), 404
 
-        try:
-            reply = generate_chat_reply(prompt)
-        except RuntimeError as e:
-            logger.warning("Gemini chat failed: %s", e)
-            return jsonify({"error": "model_unavailable", "detail": str(e)}), 503
+            user_doc = snap.to_dict() or {}
+            facts = build_assistant_facts(user_doc)
+            context_json = prompt_context_json(user_doc)
 
-        sources = matches_to_sources(prompt_matches) if use_rag else []
+            use_rag = needs_semantic_retrieval(message)
+            retrieve_k, prompt_k = rag_k_limits()
+            matches: List[Dict[str, Any]] = []
+            prompt_matches: List[Dict[str, Any]] = []
+            rerank_applied = False
+            if use_rag:
+                matches = _pinecone_matches_for_user(uid, message, top_k=retrieve_k)
+                prompt_matches, rerank_applied = rerank_pinecone_matches(
+                    message, matches, top_n=prompt_k
+                )
 
-        return jsonify(
-            {
-                "reply": reply,
-                "sources": sources,
-                "meta": {
-                    "promptVersion": prompt_version,
-                    "usedRag": bool(use_rag and prompt_matches),
-                    "ragRequested": use_rag,
-                    "sourceCount": len(sources),
-                    "retrieveCount": len(matches) if use_rag else 0,
-                    "ragRetrieveK": retrieve_k if use_rag else 0,
-                    "ragPromptK": prompt_k if use_rag else 0,
-                    "rerankEnabled": bool(use_rag and rerank_applied),
-                    "rerankConfigured": rerank_enabled(),
-                    "citationsEnabled": bool(use_rag and prompt_matches),
-                    "groundingMode": grounding_mode,
-                },
+            grounding_mode = resolve_grounding_mode(
+                rag_requested=use_rag,
+                has_prompt_matches=bool(prompt_matches),
+            )
+            if use_rag and prompt_matches:
+                rag_block = _format_numbered_rag_block(prompt_matches)
+            else:
+                rag_block = rag_block_for_grounding(
+                    rag_requested=use_rag,
+                    has_matches=bool(prompt_matches),
+                )
+            history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
+
+            prompt, prompt_version = _build_system_prompt(
+                assistant_facts=facts,
+                context_json=context_json,
+                rag_block=rag_block,
+                history_lines=history_lines,
+                user_message=message,
+            )
+
+            _log_built_prompt(
+                uid=uid,
+                prompt=prompt,
+                user_message=message,
+                context_json=context_json,
+                rag_block=rag_block,
+                history_lines=history_lines,
+                use_rag=use_rag,
+                match_count=len(prompt_matches),
+                history_turns=len(history),
+            )
+            logger.info(
+                "chat_assistant grounding uid=%s mode=%s rag_requested=%s prompt_match_count=%d",
+                uid,
+                grounding_mode,
+                use_rag,
+                len(prompt_matches),
+            )
+
+            meta = {
+                "promptVersion": prompt_version,
+                "usedRag": bool(use_rag and prompt_matches),
+                "ragRequested": use_rag,
+                "sourceCount": len(sources) if use_rag else 0,
+                "retrieveCount": len(matches) if use_rag else 0,
+                "ragRetrieveK": retrieve_k if use_rag else 0,
+                "ragPromptK": prompt_k if use_rag else 0,
+                "rerankEnabled": bool(use_rag and rerank_applied),
+                "rerankConfigured": rerank_enabled(),
+                "citationsEnabled": bool(use_rag and prompt_matches),
+                "groundingMode": grounding_mode,
             }
-        )
+            trace.update_pipeline(**meta, model=chat_model_name())
+
+            try:
+                reply = trace.record_generation(
+                    model=chat_model_name(),
+                    prompt_version=prompt_version,
+                    prompt_chars=len(prompt),
+                    call=lambda: generate_chat_reply(prompt),
+                )
+            except RuntimeError as e:
+                logger.warning("Gemini chat failed: %s", e)
+                trace.fail(status_code=503, error=str(e))
+                return jsonify({"error": "model_unavailable", "detail": str(e)}), 503
+
+            sources = matches_to_sources(prompt_matches) if use_rag else []
+            meta["sourceCount"] = len(sources)
+            trace.succeed(meta=meta, reply_chars=len(reply))
+
+            return jsonify(
+                {
+                    "reply": reply,
+                    "sources": sources,
+                    "meta": meta,
+                }
+            )
     except Exception as e:
         logger.exception("chat_assistant failed: %s", e)
         return jsonify({"error": "internal_error", "detail": str(e)}), 500

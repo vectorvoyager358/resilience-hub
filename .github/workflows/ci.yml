@@ -43,7 +43,7 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Backend unittest (mocked — no API keys)
+      - name: Backend unittest
         run: python -m unittest discover -s tests/backend -p 'test_*.py' -t .
 
       - name: Offline chat eval (routing)

@@ -376,11 +376,13 @@ def chat_assistant():
                 len(prompt_matches),
             )
 
+            sources = matches_to_sources(prompt_matches) if use_rag else []
+
             meta = {
                 "promptVersion": prompt_version,
                 "usedRag": bool(use_rag and prompt_matches),
                 "ragRequested": use_rag,
-                "sourceCount": len(sources) if use_rag else 0,
+                "sourceCount": len(sources),
                 "retrieveCount": len(matches) if use_rag else 0,
                 "ragRetrieveK": retrieve_k if use_rag else 0,
                 "ragPromptK": prompt_k if use_rag else 0,
@@ -403,8 +405,6 @@ def chat_assistant():
                 trace.fail(status_code=503, error=str(e))
                 return jsonify({"error": "model_unavailable", "detail": str(e)}), 503
 
-            sources = matches_to_sources(prompt_matches) if use_rag else []
-            meta["sourceCount"] = len(sources)
             trace.succeed(meta=meta, reply_chars=len(reply))
 
             return jsonify(

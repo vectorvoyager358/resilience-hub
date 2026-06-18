@@ -113,8 +113,7 @@ class _NoOpChatTrace:
 
 
 class _ActiveChatTrace:
-    def __init__(self, client: Any, root_span: Any) -> None:
-        self._client = client
+    def __init__(self, root_span: Any) -> None:
         self._root = root_span
 
     def update_pipeline(self, **kwargs: Any) -> None:
@@ -178,22 +177,23 @@ def chat_trace_session(
         return
 
     try:
-        with client.propagate_attributes(
-            user_id=uid,
-            trace_name="chat-assistant",
-            metadata={"historyTurns": str(history_turns)},
-        ):
-            with client.start_as_current_observation(
-                name="chat-assistant",
-                as_type="span",
-                input={
-                    "messageSha256": hash_text(message),
-                    "messageChars": len(message),
-                    "historyTurns": history_turns,
-                },
-                metadata={"service": "resilience-hub"},
-            ) as root:
-                trace = _ActiveChatTrace(client, root)
+        from langfuse import propagate_attributes
+
+        with client.start_as_current_observation(
+            name="chat-assistant",
+            as_type="span",
+            input={
+                "messageSha256": hash_text(message),
+                "messageChars": len(message),
+                "historyTurns": history_turns,
+            },
+            metadata={"service": "resilience-hub"},
+        ) as root:
+            with propagate_attributes(
+                user_id=uid,
+                metadata={"historyTurns": str(history_turns)},
+            ):
+                trace = _ActiveChatTrace(root)
                 try:
                     yield trace
                 finally:

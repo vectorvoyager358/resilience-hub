@@ -72,7 +72,7 @@ class ChatTraceSessionTest(unittest.TestCase):
         generation_span = MagicMock()
         generation_cm.__enter__ = MagicMock(return_value=generation_span)
         generation_cm.__exit__ = MagicMock(return_value=False)
-        root_span.start_observation.return_value = generation_cm
+        root_span.start_as_current_observation.return_value = generation_cm
 
         client = MagicMock()
         client._tracing_enabled = True
@@ -130,8 +130,8 @@ class ChatTraceSessionTest(unittest.TestCase):
                             reply_chars=len(reply),
                         )
 
-        root_span.start_observation.assert_called_once()
-        gen_kwargs = root_span.start_observation.call_args.kwargs
+        root_span.start_as_current_observation.assert_called_once()
+        gen_kwargs = root_span.start_as_current_observation.call_args.kwargs
         self.assertEqual(gen_kwargs.get("as_type"), "generation")
         self.assertEqual(gen_kwargs.get("model"), "gemini-2.5-flash-lite")
         self.assertNotIn("assistant reply", str(gen_kwargs.get("input")))
@@ -139,6 +139,34 @@ class ChatTraceSessionTest(unittest.TestCase):
         gen_out = generation_span.update.call_args.kwargs.get("output") or {}
         self.assertEqual(gen_out.get("replySha256"), hash_text("assistant reply"))
         client.flush.assert_called_once()
+
+    def test_body_exception_does_not_break_context_manager(self):
+        """Returning from the with-body must not trigger 'generator didn't stop after throw()'."""
+        root_span = MagicMock()
+        client = MagicMock()
+        client._tracing_enabled = True
+        client.flush = MagicMock()
+
+        @contextmanager
+        def fake_propagate(**_kwargs):
+            yield
+
+        @contextmanager
+        def fake_root(**_kwargs):
+            yield root_span
+
+        client.start_as_current_observation = fake_root
+
+        env = {
+            "LANGFUSE_PUBLIC_KEY": "pk-test",
+            "LANGFUSE_SECRET_KEY": "sk-test",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch("langfuse.Langfuse", return_value=client):
+                with patch("langfuse.propagate_attributes", fake_propagate):
+                    with chat_trace_session(uid="u1", message="hi", history_turns=0) as trace:
+                        trace.succeed(meta={"promptVersion": "chat_v1"}, reply_chars=2)
+                        # Normal exit mimics `return jsonify(...)` from the route.
 
 
 if __name__ == "__main__":

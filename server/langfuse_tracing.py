@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import sys
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator, TypeVar
 
@@ -128,7 +129,7 @@ class _ActiveChatTrace:
         prompt_chars: int,
         call: Callable[[], T],
     ) -> T:
-        with self._root.start_observation(
+        with self._root.start_as_current_observation(
             name="gemini-chat",
             as_type="generation",
             model=model,
@@ -178,29 +179,46 @@ def chat_trace_session(
 
     try:
         from langfuse import propagate_attributes
-
-        with client.start_as_current_observation(
-            name="chat-assistant",
-            as_type="span",
-            input={
-                "messageSha256": hash_text(message),
-                "messageChars": len(message),
-                "historyTurns": history_turns,
-            },
-            metadata={"service": "resilience-hub"},
-        ) as root:
-            with propagate_attributes(
-                user_id=uid,
-                metadata={"historyTurns": str(history_turns)},
-            ):
-                trace = _ActiveChatTrace(root)
-                try:
-                    yield trace
-                finally:
-                    try:
-                        client.flush()
-                    except Exception as e:
-                        logger.warning("Langfuse flush failed: %s", e)
     except Exception as e:
-        logger.warning("Langfuse trace failed (chat continues): %s", e)
+        logger.warning("Langfuse unavailable (chat continues): %s", e)
         yield _NoOpChatTrace()
+        return
+
+    obs_ctx = client.start_as_current_observation(
+        name="chat-assistant",
+        as_type="span",
+        input={
+            "messageSha256": hash_text(message),
+            "messageChars": len(message),
+            "historyTurns": history_turns,
+        },
+        metadata={"service": "resilience-hub"},
+    )
+    prop_ctx = propagate_attributes(
+        user_id=uid,
+        metadata={"historyTurns": str(history_turns)},
+    )
+    root = None
+    try:
+        root = obs_ctx.__enter__()
+        prop_ctx.__enter__()
+    except Exception as e:
+        logger.warning("Langfuse trace setup failed (chat continues): %s", e)
+        if root is not None:
+            obs_ctx.__exit__(type(e), e, e.__traceback__)
+        yield _NoOpChatTrace()
+        return
+
+    try:
+        yield _ActiveChatTrace(root)
+    finally:
+        exc_info = sys.exc_info()
+        try:
+            client.flush()
+        except Exception as e:
+            logger.warning("Langfuse flush failed: %s", e)
+        try:
+            prop_ctx.__exit__(*exc_info)
+            obs_ctx.__exit__(*exc_info)
+        except Exception as e:
+            logger.warning("Langfuse trace teardown failed: %s", e)

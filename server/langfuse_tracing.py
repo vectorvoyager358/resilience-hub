@@ -28,6 +28,7 @@ _TRACE_META_KEYS = (
     "rerankEnabled",
     "rerankConfigured",
     "citationsEnabled",
+    "emptyRetrieval",
 )
 
 

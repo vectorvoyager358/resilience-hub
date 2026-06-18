@@ -896,6 +896,18 @@ class ChatEndpointSourcesTest(unittest.TestCase):
         cls.app_module = _load_app()
         cls.client = cls.app_module.app.test_client()
 
+    def setUp(self):
+        # .env may configure Cohere; these tests assert Pinecone order unless rerank is mocked.
+        self._rerank_off = patch.dict(
+            os.environ,
+            {"COHERE_API_KEY": "", "RERANK_ENABLED": "off"},
+            clear=False,
+        )
+        self._rerank_off.start()
+
+    def tearDown(self):
+        self._rerank_off.stop()
+
     def test_sources_empty_when_rag_not_requested(self):
         user_doc = {"challenges": [], "dailyNotes": {}}
         with _stub_verified_uid("uid-src", email_verified=True):

@@ -6,8 +6,13 @@ on:
     branches: [ main ]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
+    name: frontend (Vitest + build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -30,7 +35,14 @@ jobs:
         run: npm run build
 
   backend:
+    name: backend (unittest + offline eval)
     runs-on: ubuntu-latest
+    env:
+      # Ensure routing/auth tests never call live APIs (mocks only).
+      GEMINI_API_KEY: ""
+      PINECONE_API_KEY: ""
+      LANGFUSE_PUBLIC_KEY: ""
+      LANGFUSE_SECRET_KEY: ""
     steps:
       - uses: actions/checkout@v6
 
@@ -46,6 +58,6 @@ jobs:
       - name: Backend unittest
         run: python -m unittest discover -s tests/backend -p 'test_*.py' -t .
 
-      - name: Offline chat eval (routing)
+      - name: Offline chat eval (golden routing)
         run: python scripts/run_chat_eval.py
 

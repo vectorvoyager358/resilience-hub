@@ -269,6 +269,55 @@ def matches_to_sources(matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sources
 
 
+def build_chat_response_meta(
+    *,
+    prompt_version: str,
+    use_rag: bool,
+    source_count: int,
+    retrieve_count: int,
+    retrieve_k: int,
+    prompt_k: int,
+    rerank_applied: bool,
+    grounding_mode: str,
+) -> Dict[str, Any]:
+    """Quality-proxy fields for API meta, Langfuse, and log aggregation (#85)."""
+    used_rag = bool(use_rag and source_count > 0)
+    empty_retrieval = bool(use_rag and retrieve_count == 0)
+    return {
+        "promptVersion": prompt_version,
+        "usedRag": used_rag,
+        "ragRequested": use_rag,
+        "sourceCount": source_count,
+        "retrieveCount": retrieve_count,
+        "ragRetrieveK": retrieve_k if use_rag else 0,
+        "ragPromptK": prompt_k if use_rag else 0,
+        "rerankEnabled": bool(use_rag and rerank_applied),
+        "rerankConfigured": rerank_enabled(),
+        "citationsEnabled": used_rag,
+        "groundingMode": grounding_mode,
+        "emptyRetrieval": empty_retrieval,
+    }
+
+
+def _log_chat_quality(*, uid: str, meta: Dict[str, Any]) -> None:
+    """Structured INFO line for log-based metrics (empty retrieval rate, etc.)."""
+    logger.info(
+        "chat_assistant_quality uid=%s prompt_version=%s rag_requested=%s used_rag=%s "
+        "empty_retrieval=%s grounding_mode=%s source_count=%d retrieve_count=%d "
+        "rerank_enabled=%s citations_enabled=%s",
+        uid,
+        meta.get("promptVersion"),
+        meta.get("ragRequested"),
+        meta.get("usedRag"),
+        meta.get("emptyRetrieval"),
+        meta.get("groundingMode"),
+        meta.get("sourceCount", 0),
+        meta.get("retrieveCount", 0),
+        meta.get("rerankEnabled"),
+        meta.get("citationsEnabled"),
+    )
+
+
 def _build_system_prompt(
     *,
     assistant_facts: Dict[str, Any],
@@ -392,19 +441,17 @@ def chat_assistant():
 
             sources = matches_to_sources(prompt_matches) if use_rag else []
 
-            meta = {
-                "promptVersion": prompt_version,
-                "usedRag": bool(use_rag and prompt_matches),
-                "ragRequested": use_rag,
-                "sourceCount": len(sources),
-                "retrieveCount": len(matches) if use_rag else 0,
-                "ragRetrieveK": retrieve_k if use_rag else 0,
-                "ragPromptK": prompt_k if use_rag else 0,
-                "rerankEnabled": bool(use_rag and rerank_applied),
-                "rerankConfigured": rerank_enabled(),
-                "citationsEnabled": bool(use_rag and prompt_matches),
-                "groundingMode": grounding_mode,
-            }
+            meta = build_chat_response_meta(
+                prompt_version=prompt_version,
+                use_rag=use_rag,
+                source_count=len(sources),
+                retrieve_count=len(matches) if use_rag else 0,
+                retrieve_k=retrieve_k,
+                prompt_k=prompt_k,
+                rerank_applied=rerank_applied,
+                grounding_mode=grounding_mode,
+            )
+            _log_chat_quality(uid=uid, meta=meta)
             trace.update_pipeline(**meta, model=chat_model_name())
 
             try:

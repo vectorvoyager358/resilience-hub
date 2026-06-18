@@ -33,6 +33,22 @@ _GOLDEN_EVAL_PATH = Path(__file__).resolve().parents[2] / "evals" / "chat_golden
 # Stable keys returned by matches_to_sources / API sources[] (#70, #80).
 SOURCE_API_KEYS = frozenset({"index", "id", "type", "date", "snippet", "score"})
 
+# Stable keys on API meta.quality / response meta (#85).
+CHAT_META_KEYS = frozenset({
+    "promptVersion",
+    "usedRag",
+    "ragRequested",
+    "sourceCount",
+    "retrieveCount",
+    "ragRetrieveK",
+    "ragPromptK",
+    "rerankEnabled",
+    "rerankConfigured",
+    "citationsEnabled",
+    "groundingMode",
+    "emptyRetrieval",
+})
+
 
 # ---------------------------------------------------------------------------
 # Minimal stubs needed to import the Flask app without real dependencies
@@ -615,6 +631,62 @@ class BuildSystemPromptTest(unittest.TestCase):
         self.assertIn("[1] note (2026-03-01): Logged cold shower.", prompt)
 
 
+class BuildChatResponseMetaTest(unittest.TestCase):
+    """Quality proxy meta fields (#85)."""
+
+    def test_empty_retrieval_when_rag_and_no_hits(self):
+        from server.routes.chat import build_chat_response_meta
+
+        meta = build_chat_response_meta(
+            prompt_version="chat_v1",
+            use_rag=True,
+            source_count=0,
+            retrieve_count=0,
+            retrieve_k=24,
+            prompt_k=8,
+            rerank_applied=False,
+            grounding_mode="facts_only",
+        )
+        self.assertTrue(meta["emptyRetrieval"])
+        self.assertTrue(meta["ragRequested"])
+        self.assertFalse(meta["usedRag"])
+        self.assertEqual(meta["groundingMode"], "facts_only")
+        self.assertEqual(set(meta.keys()), CHAT_META_KEYS)
+
+    def test_no_empty_retrieval_when_rag_has_hits(self):
+        from server.routes.chat import build_chat_response_meta
+
+        meta = build_chat_response_meta(
+            prompt_version="chat_v1",
+            use_rag=True,
+            source_count=2,
+            retrieve_count=5,
+            retrieve_k=24,
+            prompt_k=8,
+            rerank_applied=True,
+            grounding_mode="rag",
+        )
+        self.assertFalse(meta["emptyRetrieval"])
+        self.assertTrue(meta["usedRag"])
+        self.assertTrue(meta["citationsEnabled"])
+
+    def test_empty_retrieval_false_when_rag_not_requested(self):
+        from server.routes.chat import build_chat_response_meta
+
+        meta = build_chat_response_meta(
+            prompt_version="chat_v1",
+            use_rag=False,
+            source_count=0,
+            retrieve_count=0,
+            retrieve_k=24,
+            prompt_k=8,
+            rerank_applied=False,
+            grounding_mode="facts_only",
+        )
+        self.assertFalse(meta["emptyRetrieval"])
+        self.assertFalse(meta["ragRequested"])
+
+
 class GroundingModeTest(unittest.TestCase):
     """Facts-only when RAG requested but retrieval empty (#75)."""
 
@@ -843,6 +915,8 @@ class ChatEndpointSourcesTest(unittest.TestCase):
         self.assertEqual(body.get("sources"), [])
         self.assertEqual(body["meta"]["sourceCount"], 0)
         self.assertFalse(body["meta"]["ragRequested"])
+        self.assertFalse(body["meta"]["emptyRetrieval"])
+        self.assertEqual(set(body["meta"].keys()), CHAT_META_KEYS)
         self.assertEqual(body["meta"].get("promptVersion"), "chat_v1")
 
     def test_sources_populated_when_rag_matches(self):
@@ -1032,6 +1106,7 @@ class ChatEndpointSourcesTest(unittest.TestCase):
         self.assertEqual(body.get("sources"), [])
         self.assertFalse(body["meta"]["usedRag"])
         self.assertTrue(body["meta"]["ragRequested"])
+        self.assertTrue(body["meta"]["emptyRetrieval"])
         self.assertEqual(body["meta"]["groundingMode"], "facts_only")
         self.assertFalse(body["meta"]["citationsEnabled"])
         self.assertEqual(len(captured_prompt), 1)

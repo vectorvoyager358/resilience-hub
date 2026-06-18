@@ -12,12 +12,34 @@ Every successful chat response includes a `meta` object (also mirrored into Lang
 | `promptVersion`    | Loaded system prompt template id (e.g. `chat_v1`) |
 | `ragRequested`     | Intent router asked for semantic retrieval        |
 | `usedRag`          | Numbered memory block was included in the prompt  |
-| `groundingMode`    | `facts_only`, `rag`, or `empty_rag`               |
+| `groundingMode`    | `rag` or `facts_only`                             |
+| `emptyRetrieval`   | `ragRequested` and Pinecone returned **0** hits   |
 | `sourceCount`      | Citations returned in `sources[]`                 |
 | `retrieveCount`    | Pinecone hits before rerank / prompt slice        |
 | `rerankEnabled`    | Cohere rerank re-ordered hits this request        |
 | `rerankConfigured` | `COHERE_API_KEY` + `RERANK_ENABLED` present       |
 | `citationsEnabled` | Model was instructed to use `[n]` markers         |
+
+### Quality proxy metrics (#85)
+
+Use response `meta` and the structured log line `chat_assistant_quality` (INFO) to monitor grounding health without full RAGAS on every request.
+
+| Metric | Definition | Source |
+|--------|------------|--------|
+| **Empty retrieval rate** | Share of RAG-routed requests with no Pinecone hits | `emptyRetrieval=true` when `ragRequested=true` |
+| **RAG grounding rate** | Share of RAG-routed requests that used indexed memories | `usedRag=true` |
+| **Facts-only fallback rate** | RAG requested but prompt used facts-only grounding | `groundingMode=facts_only` and `ragRequested=true` |
+| **Citation rate** | Responses that returned `sources[]` | `sourceCount > 0` |
+
+**Example log line** (Cloud Logging / local):
+
+```text
+chat_assistant_quality uid=… rag_requested=True empty_retrieval=True grounding_mode=facts_only source_count=0 retrieve_count=0 …
+```
+
+**Log-based aggregation (GCP):** filter `textPayload:chat_assistant_quality` or parse JSON if you add a log sink; compute `empty_retrieval=true` / `rag_requested=true` over a window for empty-retrieval rate.
+
+**Langfuse:** `emptyRetrieval` and related fields are copied to trace metadata when tracing is enabled.
 
 
 ### Server logs

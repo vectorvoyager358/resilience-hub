@@ -209,6 +209,7 @@ Built by **`matches_to_sources`** from the **prompt slice** (top **`RAG_PROMPT_K
 | **`rerankConfigured`** | **`true`** when `COHERE_API_KEY` is set and `RERANK_ENABLED` is not off. |
 | **`citationsEnabled`** | **`true`** when RAG returned at least one memory in the prompt slice. |
 | **`groundingMode`** | **`rag`** when numbered memories are in the prompt; **`facts_only`** otherwise (including RAG requested but empty, or RAG not used). |
+| **`emptyRetrieval`** | **`true`** when **`ragRequested`** and Pinecone returned **0** hits ([#85](https://github.com/vectorvoyager358/resilience-hub/issues/85)). |
 
 So: you can have **`ragRequested: true`** and **`usedRag: false`** if the index returned no rows or Pinecone was skipped due to missing env / failure (matches empty). In that case **`groundingMode`** is **`facts_only`** and the model is instructed to answer from Authoritative facts + Rich context only, with a warm note if indexed memories are missing.
 
@@ -241,6 +242,7 @@ See **`.env.example`** for the authoritative list. Commonly relevant for this fl
 - **`COHERE_API_KEY`** — required for reranking when enabled.
 - **`RERANK_ENABLED`** — `1` / `0` (default: on when `COHERE_API_KEY` is set).
 - **`RERANK_MODEL`** — Cohere rerank model (default `rerank-v3.5`).
+- **`LANGFUSE_*`**, **`CHAT_LOG_STAGE_TIMINGS`** — tracing and stage timing; see [`observability.md`](observability.md).
 
 ---
 

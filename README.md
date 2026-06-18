@@ -7,19 +7,40 @@
 **A retrieval-augmented (RAG) assistant over your own resilience notes and challenges—Flask orchestrates Gemini + Pinecone; a small web client captures text and talks to the API.**
 
 <p align="center">
+  <a href="https://github.com/vectorvoyager358/resilience-hub/actions/workflows/ci.yml">
+    <img src="https://github.com/vectorvoyager358/resilience-hub/actions/workflows/ci.yml/badge.svg" alt="CI" />
+  </a>
+  <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT" />
+</p>
+<p align="center">
   <img src="https://img.shields.io/badge/RAG-retrieval%20augmented-0d9488?style=flat-square" alt="RAG: retrieval augmented" />
   <img src="https://img.shields.io/badge/Pinecone-vector%20index-000000?style=flat-square&logo=pinecone&logoColor=white" alt="Pinecone" />
-  <img src="https://img.shields.io/badge/Vector%20embeddings-Gemini%20API-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="Vector embeddings (Gemini)" />
-  <img src="https://img.shields.io/badge/Gemini-AI-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="Gemini AI" />
+  <img src="https://img.shields.io/badge/Gemini-chat%20%2B%20embed-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="Gemini chat and embeddings" />
+  <img src="https://img.shields.io/badge/Cohere-rerank-39594D?style=flat-square&logo=cohere&logoColor=white" alt="Cohere rerank" />
+  <img src="https://img.shields.io/badge/Citations-%5B1%5D%20%5B2%5D-0d9488?style=flat-square" alt="Numbered citations" />
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white" alt="Google Cloud Run" />
   <img src="https://img.shields.io/badge/Firebase-platform-FFCA28?style=flat-square&logo=firebase&logoColor=black" alt="Firebase" />
   <img src="https://img.shields.io/badge/Firestore-database-FFCA28?style=flat-square&logo=firebase&logoColor=black" alt="Firestore" />
-  <img src="https://img.shields.io/github/actions/workflow/status/vectorvoyager358/resilience-hub/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" />
-  <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT" />
+  <img src="https://img.shields.io/badge/Flask-API-000000?style=flat-square&logo=flask&logoColor=white" alt="Flask API" />
+</p>
+<p align="center">
+  <a href="docs/observability.md">
+    <img src="https://img.shields.io/badge/Langfuse-tracing-6366f1?style=flat-square" alt="Langfuse tracing" />
+  </a>
+  <a href="docs/observability.md">
+    <img src="https://img.shields.io/badge/Observability-runbook-6366f1?style=flat-square" alt="Observability runbook" />
+  </a>
+  <a href="evals/README.md">
+    <img src="https://img.shields.io/badge/Golden%20evals-ca8a04?style=flat-square" alt="Golden evals" />
+  </a>
+  <img src="https://img.shields.io/badge/pytest%20%2B%20Vitest-CI-2088FF?style=flat-square&logo=githubactions&logoColor=white" alt="pytest and Vitest in CI" />
+</p>
+<p align="center">
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React" />
-  <img src="https://img.shields.io/badge/Python-3.x-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/TypeScript-Vite-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript and Vite" />
 </p>
 
 </div>
@@ -80,7 +101,7 @@ flowchart TB
 2. **Chat path**: **`/api/chat-assistant`** (`server/routes/chat.py`) verifies the Firebase bearer token, builds **structured context** from Firestore (`server/assistant_facts.py`), and when **`needs_semantic_retrieval`** says the question needs note-level grounding, runs **embed + Pinecone query** (`_pinecone_matches_for_user`) for top-k chunks. Retrieved text is merged into the prompt; **Gemini** generates the reply (`server/gemini_client.py`).
 3. **Safety and ops**: **Token-bucket rate limits** protect Pinecone, embed, and chat routes; **CORS** is origin-locked for credentialed browser calls; **`GEMINI_API_KEY`** and **`PINECONE_API_KEY`** never ship in frontend env vars.
 
-For a fuller step-by-step (prompt layers, RAG vs no-RAG), see [`docs/chat-assistant-flow.md`](docs/chat-assistant-flow.md). For **how notes are indexed** (current one-vector-per-write vs planned chunking), see [`docs/rag-indexing.md`](docs/rag-indexing.md).
+For a fuller step-by-step (prompt layers, RAG vs no-RAG), see [`docs/chat-assistant-flow.md`](docs/chat-assistant-flow.md). For **how notes are indexed** (current one-vector-per-write vs planned chunking), see [`docs/rag-indexing.md`](docs/rag-indexing.md). For **debugging quality and traces** (Langfuse, `meta`, logs), see [`docs/observability.md`](docs/observability.md).
 
 If Pinecone or the API is down, **Firestore-backed tracking** in the client can still operate; **RAG enrichment** is the optional upgrade path.
 
@@ -178,27 +199,7 @@ Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backe
 
 More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/observability.md`, `docs/rag-indexing.md`, `docs/push-reminders.md`, `docs/weather-dashboard.md`, and `docs/portfolio-roadmap.md`).
 
-## Contributing
-
-Every pull request and push to **`main`** runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml). You should see two checks on GitHub:
-
-| Job | What it runs |
-|-----|----------------|
-| **frontend (Vitest + build)** | `npm run test:run`, then `npm run build` |
-| **backend (unittest + offline eval)** | `python -m unittest discover -s tests/backend`, then `scripts/run_chat_eval.py` |
-
-No live API keys are required — CI clears `GEMINI_API_KEY`, `PINECONE_API_KEY`, and Langfuse keys; tests use mocks and the offline golden eval only exercises routing.
-
-**Before opening a PR**, from the repo root:
-
-```bash
-npm install
-npm run test:run
-npm run test:server
-npm run eval:chat
-```
-
-Python tests expect a venv with `pip install -r requirements.txt` (see [Local setup](#local-setup)); `npm run test:server` uses `.venv/bin/python` automatically.
+More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/rag-indexing.md`, `docs/observability.md`, `docs/push-reminders.md`, `docs/weather-dashboard.md`, and `docs/portfolio-roadmap.md`).
 
 ## Environment variables reference
 

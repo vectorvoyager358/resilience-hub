@@ -42,3 +42,21 @@ Full prompts and message text are **never** sent to Langfuse.
 Set `LANGFUSE_HOST` for self-hosted Langfuse; defaults to Langfuse Cloud.
 
 Implementation: `server/langfuse_tracing.py`, wired in `server/routes/chat.py`.
+
+### Per-stage latency spans (#84)
+
+When Langfuse tracing is enabled, each chat trace includes child **span** observations with wall-clock duration in `output.durationMs`:
+
+| Span | When |
+|------|------|
+| `firestore-load` | Firestore `users/{uid}` read |
+| `context-build` | `build_assistant_facts` + `prompt_context_json` |
+| `embed-query` | Gemini query embedding (RAG only) |
+| `pinecone-query` | Pinecone vector search (RAG only) |
+| `cohere-rerank` | Cohere rerank over matches (RAG only) |
+| `prompt-assemble` | Versioned system prompt render |
+| `gemini-chat` | Gemini generation (generation observation) |
+
+**Langfuse UI:** open a trace → timeline shows each span’s latency; compare stages across requests.
+
+**Percentiles (p50 / p95):** Langfuse **Metrics** and observation analytics aggregate latency by observation `name` when enough volume exists — no custom p95 code in-app. For ad-hoc debugging, set `CHAT_LOG_STAGE_TIMINGS=1` to emit `chat_assistant stage=… duration_ms=…` in Cloud Run / local logs (works even when Langfuse is off).

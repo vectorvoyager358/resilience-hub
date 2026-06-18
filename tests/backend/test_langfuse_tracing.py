@@ -168,6 +168,46 @@ class ChatTraceSessionTest(unittest.TestCase):
                         trace.succeed(meta={"promptVersion": "chat_v1"}, reply_chars=2)
                         # Normal exit mimics `return jsonify(...)` from the route.
 
+    def test_stage_span_records_duration(self):
+        root_span = MagicMock()
+        stage_cm = MagicMock()
+        stage_span = MagicMock()
+        stage_cm.__enter__ = MagicMock(return_value=stage_span)
+        stage_cm.__exit__ = MagicMock(return_value=False)
+        root_span.start_as_current_observation.return_value = stage_cm
+
+        client = MagicMock()
+        client._tracing_enabled = True
+        client.flush = MagicMock()
+
+        @contextmanager
+        def fake_propagate(**_kwargs):
+            yield
+
+        @contextmanager
+        def fake_root(**_kwargs):
+            yield root_span
+
+        client.start_as_current_observation = fake_root
+
+        env = {
+            "LANGFUSE_PUBLIC_KEY": "pk-test",
+            "LANGFUSE_SECRET_KEY": "sk-test",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch("langfuse.Langfuse", return_value=client):
+                with patch("langfuse.propagate_attributes", fake_propagate):
+                    with chat_trace_session(uid="u1", message="hi", history_turns=0) as trace:
+                        with trace.stage("firestore-load"):
+                            pass
+
+        root_span.start_as_current_observation.assert_called_once()
+        stage_kwargs = root_span.start_as_current_observation.call_args.kwargs
+        self.assertEqual(stage_kwargs.get("name"), "firestore-load")
+        self.assertEqual(stage_kwargs.get("as_type"), "span")
+        stage_span.update.assert_called_once()
+        self.assertIn("durationMs", stage_span.update.call_args.kwargs.get("output", {}))
+
 
 if __name__ == "__main__":
     unittest.main()

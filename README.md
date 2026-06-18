@@ -16,6 +16,7 @@
   <img src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white" alt="Google Cloud Run" />
   <img src="https://img.shields.io/badge/Firebase-platform-FFCA28?style=flat-square&logo=firebase&logoColor=black" alt="Firebase" />
   <img src="https://img.shields.io/badge/Firestore-database-FFCA28?style=flat-square&logo=firebase&logoColor=black" alt="Firestore" />
+  <img src="https://img.shields.io/github/actions/workflow/status/vectorvoyager358/resilience-hub/ci.yml?branch=main&style=flat-square&label=CI" alt="CI" />
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License: MIT" />
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React" />
   <img src="https://img.shields.io/badge/Python-3.x-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
@@ -33,6 +34,7 @@
 - [Tech stack](#tech-stack)
 - [Local setup](#local-setup)
 - [Available scripts](#available-scripts)
+- [Contributing](#contributing)
 - [Environment variables reference](#environment-variables-reference)
 - [Deployment](#deployment)
 
@@ -174,9 +176,29 @@ Vite defaults to **5173** and proxies **`/api`** to **`http://localhost:5001`** 
 
 Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backend` (Python), `tests/e2e` (Playwright).
 
-**CI** (`.github/workflows/ci.yml`) runs frontend Vitest + build and backend `unittest` + offline chat eval on every push/PR — no `GEMINI_API_KEY` or Pinecone required (mocks only).
+More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/observability.md`, `docs/rag-indexing.md`, `docs/push-reminders.md`, `docs/weather-dashboard.md`, and `docs/portfolio-roadmap.md`).
 
-More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/rag-indexing.md`, `docs/push-reminders.md`, `docs/weather-dashboard.md`, and `docs/portfolio-roadmap.md`).
+## Contributing
+
+Every pull request and push to **`main`** runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml). You should see two checks on GitHub:
+
+| Job | What it runs |
+|-----|----------------|
+| **frontend (Vitest + build)** | `npm run test:run`, then `npm run build` |
+| **backend (unittest + offline eval)** | `python -m unittest discover -s tests/backend`, then `scripts/run_chat_eval.py` |
+
+No live API keys are required — CI clears `GEMINI_API_KEY`, `PINECONE_API_KEY`, and Langfuse keys; tests use mocks and the offline golden eval only exercises routing.
+
+**Before opening a PR**, from the repo root:
+
+```bash
+npm install
+npm run test:run
+npm run test:server
+npm run eval:chat
+```
+
+Python tests expect a venv with `pip install -r requirements.txt` (see [Local setup](#local-setup)); `npm run test:server` uses `.venv/bin/python` automatically.
 
 ## Environment variables reference
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import unittest
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -48,6 +49,14 @@ class LangfuseConfiguredTest(unittest.TestCase):
         }
         with patch.dict(os.environ, env, clear=True):
             self.assertFalse(langfuse_tracing_configured())
+
+
+def _patch_langfuse_module(*, client: MagicMock, propagate: object) -> patch:
+    """Inject a fake langfuse module so tests never require pip install."""
+    mock_mod = MagicMock()
+    mock_mod.Langfuse.return_value = client
+    mock_mod.propagate_attributes = propagate
+    return patch.dict(sys.modules, {"langfuse": mock_mod})
 
 
 class ChatTraceSessionTest(unittest.TestCase):
@@ -97,38 +106,37 @@ class ChatTraceSessionTest(unittest.TestCase):
             "LANGFUSE_SECRET_KEY": "sk-test",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch("langfuse.Langfuse", return_value=client):
-                with patch("langfuse.propagate_attributes", fake_propagate):
-                    with chat_trace_session(
-                        uid="uid-abc",
-                        message="what did I write",
-                        history_turns=2,
-                    ) as trace:
-                        reply = trace.record_generation(
-                            model="gemini-2.5-flash-lite",
-                            prompt_version="chat_v1",
-                            prompt_chars=1200,
-                            call=lambda: "assistant reply",
-                        )
-                        trace.update_pipeline(
-                            ragRequested=True,
-                            usedRag=True,
-                            promptVersion="chat_v1",
-                        )
-                        trace.succeed(
-                            meta={
-                                "promptVersion": "chat_v1",
-                                "ragRequested": True,
-                                "usedRag": True,
-                                "groundingMode": "rag",
-                                "sourceCount": 1,
-                                "retrieveCount": 3,
-                                "rerankEnabled": False,
-                                "rerankConfigured": False,
-                                "citationsEnabled": True,
-                            },
-                            reply_chars=len(reply),
-                        )
+            with _patch_langfuse_module(client=client, propagate=fake_propagate):
+                with chat_trace_session(
+                    uid="uid-abc",
+                    message="what did I write",
+                    history_turns=2,
+                ) as trace:
+                    reply = trace.record_generation(
+                        model="gemini-2.5-flash-lite",
+                        prompt_version="chat_v1",
+                        prompt_chars=1200,
+                        call=lambda: "assistant reply",
+                    )
+                    trace.update_pipeline(
+                        ragRequested=True,
+                        usedRag=True,
+                        promptVersion="chat_v1",
+                    )
+                    trace.succeed(
+                        meta={
+                            "promptVersion": "chat_v1",
+                            "ragRequested": True,
+                            "usedRag": True,
+                            "groundingMode": "rag",
+                            "sourceCount": 1,
+                            "retrieveCount": 3,
+                            "rerankEnabled": False,
+                            "rerankConfigured": False,
+                            "citationsEnabled": True,
+                        },
+                        reply_chars=len(reply),
+                    )
 
         root_span.start_as_current_observation.assert_called_once()
         gen_kwargs = root_span.start_as_current_observation.call_args.kwargs
@@ -162,11 +170,10 @@ class ChatTraceSessionTest(unittest.TestCase):
             "LANGFUSE_SECRET_KEY": "sk-test",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch("langfuse.Langfuse", return_value=client):
-                with patch("langfuse.propagate_attributes", fake_propagate):
-                    with chat_trace_session(uid="u1", message="hi", history_turns=0) as trace:
-                        trace.succeed(meta={"promptVersion": "chat_v1"}, reply_chars=2)
-                        # Normal exit mimics `return jsonify(...)` from the route.
+            with _patch_langfuse_module(client=client, propagate=fake_propagate):
+                with chat_trace_session(uid="u1", message="hi", history_turns=0) as trace:
+                    trace.succeed(meta={"promptVersion": "chat_v1"}, reply_chars=2)
+                    # Normal exit mimics `return jsonify(...)` from the route.
 
     def test_stage_span_records_duration(self):
         root_span = MagicMock()
@@ -195,11 +202,10 @@ class ChatTraceSessionTest(unittest.TestCase):
             "LANGFUSE_SECRET_KEY": "sk-test",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch("langfuse.Langfuse", return_value=client):
-                with patch("langfuse.propagate_attributes", fake_propagate):
-                    with chat_trace_session(uid="u1", message="hi", history_turns=0) as trace:
-                        with trace.stage("firestore-load"):
-                            pass
+            with _patch_langfuse_module(client=client, propagate=fake_propagate):
+                with chat_trace_session(uid="u1", message="hi", history_turns=0) as trace:
+                    with trace.stage("firestore-load"):
+                        pass
 
         root_span.start_as_current_observation.assert_called_once()
         stage_kwargs = root_span.start_as_current_observation.call_args.kwargs

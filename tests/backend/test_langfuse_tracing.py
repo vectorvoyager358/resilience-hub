@@ -90,7 +90,6 @@ class ChatTraceSessionTest(unittest.TestCase):
             self.assertNotIn("what did I write", str(inp))
             yield root_span
 
-        client.propagate_attributes = fake_propagate
         client.start_as_current_observation = fake_root
 
         env = {
@@ -99,7 +98,8 @@ class ChatTraceSessionTest(unittest.TestCase):
         }
         with patch.dict(os.environ, env, clear=True):
             with patch("langfuse.Langfuse", return_value=client):
-                with chat_trace_session(
+                with patch("langfuse.propagate_attributes", fake_propagate):
+                    with chat_trace_session(
                         uid="uid-abc",
                         message="what did I write",
                         history_turns=2,

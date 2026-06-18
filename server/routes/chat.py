@@ -15,7 +15,7 @@ from server.chat_context import prompt_context_json
 from server.firebase_util import init_firebase_admin, verify_bearer_uid_and_email_verified
 from server.gemini_client import chat_model_name, generate_chat_reply
 from server.intent_chat import needs_semantic_retrieval
-from server.langfuse_tracing import chat_trace_session
+from server.langfuse_tracing import chat_trace_session, noop_trace_stage
 from server.prompt_loader import (
     rag_block_for_grounding,
     render_chat_system_prompt,
@@ -164,7 +164,12 @@ def _sanitize_chat_payload(message: str, history_raw: object) -> tuple[str, List
     return msg, history
 
 
-def _pinecone_matches_for_user(uid: str, query_text: str, top_k: int) -> List[Dict[str, Any]]:
+def _pinecone_matches_for_user(
+    uid: str,
+    query_text: str,
+    top_k: int,
+    trace: Any = None,
+) -> List[Dict[str, Any]]:
     try:
         from pinecone import Pinecone  # type: ignore[import-untyped]
         import os
@@ -175,15 +180,18 @@ def _pinecone_matches_for_user(uid: str, query_text: str, top_k: int) -> List[Di
         if not api_key or not index_name:
             return []
 
-        vec = embed_query_text(query_text)
+        stage = trace.stage if trace is not None else noop_trace_stage
+        with stage("embed-query"):
+            vec = embed_query_text(query_text)
         pc = Pinecone(api_key=api_key)
         index = pc.Index(index_name)
-        q = index.query(
-            vector=vec,
-            top_k=top_k,
-            include_metadata=True,
-            filter={"user_id": uid},
-        )
+        with stage("pinecone-query", topK=top_k):
+            q = index.query(
+                vector=vec,
+                top_k=top_k,
+                include_metadata=True,
+                filter={"user_id": uid},
+            )
         matches: List[Dict[str, Any]] = []
         for m in getattr(q, "matches", []) or []:
             md = getattr(m, "metadata", None) or {}
@@ -314,16 +322,18 @@ def chat_assistant():
             message=message,
             history_turns=len(history),
         ) as trace:
-            init_firebase_admin()
-            db = firestore.Client()
-            snap = db.collection("users").document(uid).get()
+            with trace.stage("firestore-load"):
+                init_firebase_admin()
+                db = firestore.Client()
+                snap = db.collection("users").document(uid).get()
             if not snap.exists:
                 trace.fail(status_code=404, error="user_not_found")
                 return jsonify({"error": "user_not_found"}), 404
 
-            user_doc = snap.to_dict() or {}
-            facts = build_assistant_facts(user_doc)
-            context_json = prompt_context_json(user_doc)
+            with trace.stage("context-build"):
+                user_doc = snap.to_dict() or {}
+                facts = build_assistant_facts(user_doc)
+                context_json = prompt_context_json(user_doc)
 
             use_rag = needs_semantic_retrieval(message)
             retrieve_k, prompt_k = rag_k_limits()
@@ -331,10 +341,13 @@ def chat_assistant():
             prompt_matches: List[Dict[str, Any]] = []
             rerank_applied = False
             if use_rag:
-                matches = _pinecone_matches_for_user(uid, message, top_k=retrieve_k)
-                prompt_matches, rerank_applied = rerank_pinecone_matches(
-                    message, matches, top_n=prompt_k
+                matches = _pinecone_matches_for_user(
+                    uid, message, top_k=retrieve_k, trace=trace
                 )
+                with trace.stage("cohere-rerank", topN=prompt_k):
+                    prompt_matches, rerank_applied = rerank_pinecone_matches(
+                        message, matches, top_n=prompt_k
+                    )
 
             grounding_mode = resolve_grounding_mode(
                 rag_requested=use_rag,
@@ -349,13 +362,14 @@ def chat_assistant():
                 )
             history_lines = "\n".join(f'{h["role"]}: {h["content"]}' for h in history) or "(none)"
 
-            prompt, prompt_version = _build_system_prompt(
-                assistant_facts=facts,
-                context_json=context_json,
-                rag_block=rag_block,
-                history_lines=history_lines,
-                user_message=message,
-            )
+            with trace.stage("prompt-assemble"):
+                prompt, prompt_version = _build_system_prompt(
+                    assistant_facts=facts,
+                    context_json=context_json,
+                    rag_block=rag_block,
+                    history_lines=history_lines,
+                    user_message=message,
+                )
 
             _log_built_prompt(
                 uid=uid,

@@ -10,6 +10,7 @@ import hashlib
 import logging
 import os
 import sys
+import time
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator, TypeVar
 
@@ -90,11 +91,34 @@ def _get_langfuse_client() -> Any | None:
         return None
 
 
+@contextmanager
+def noop_trace_stage(_name: str, **_metadata: Any) -> Iterator[None]:
+    """No-op stage context for callers without an active Langfuse trace."""
+    yield
+
+
 class _NoOpChatTrace:
     """Zero-overhead stand-in when Langfuse is disabled."""
 
     def update_pipeline(self, **_kwargs: Any) -> None:
         return None
+
+    @contextmanager
+    def stage(self, name: str, **metadata: Any) -> Iterator[None]:
+        if _env_truthy("CHAT_LOG_STAGE_TIMINGS"):
+            start = time.perf_counter()
+            try:
+                yield
+            finally:
+                duration_ms = int((time.perf_counter() - start) * 1000)
+                logger.info(
+                    "chat_assistant stage=%s duration_ms=%d metadata=%s",
+                    name,
+                    duration_ms,
+                    metadata or {},
+                )
+        else:
+            yield
 
     def record_generation(
         self,
@@ -120,6 +144,27 @@ class _ActiveChatTrace:
     def update_pipeline(self, **kwargs: Any) -> None:
         if kwargs:
             self._root.update(metadata=kwargs)
+
+    @contextmanager
+    def stage(self, name: str, **metadata: Any) -> Iterator[Any]:
+        start = time.perf_counter()
+        with self._root.start_as_current_observation(
+            name=name,
+            as_type="span",
+            metadata=metadata or None,
+        ) as span:
+            try:
+                yield span
+            finally:
+                duration_ms = int((time.perf_counter() - start) * 1000)
+                span.update(output={"durationMs": duration_ms})
+                if _env_truthy("CHAT_LOG_STAGE_TIMINGS"):
+                    logger.info(
+                        "chat_assistant stage=%s duration_ms=%d metadata=%s",
+                        name,
+                        duration_ms,
+                        metadata or {},
+                    )
 
     def record_generation(
         self,

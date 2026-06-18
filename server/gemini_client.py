@@ -15,6 +15,11 @@ _EMBED_MODEL = "gemini-embedding-001"
 _CHAT_MODEL = "gemini-2.5-flash-lite"
 
 
+def chat_model_name() -> str:
+    """Public model id for observability / API meta."""
+    return _CHAT_MODEL
+
+
 def _api_key() -> str:
     return (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
 

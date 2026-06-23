@@ -23,10 +23,14 @@ jobs:
           cache: npm
 
       - name: Install
-        run: npm install --include=optional --no-audit --no-fund
+        run: npm ci --include=optional --no-audit --no-fund
 
       - name: Ensure Rollup native bindings (Linux)
         run: npm install --no-audit --no-fund --save-dev @rollup/rollup-linux-x64-gnu
+
+      - name: npm audit (high and critical)
+        run: npm audit --audit-level=high
+        continue-on-error: true
 
       - name: Test
         run: npm run test:run
@@ -54,6 +58,9 @@ jobs:
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
+
+      - name: pip audit (known vulnerabilities)
+        run: pip install pip-audit && pip-audit -r requirements.txt
 
       - name: Backend unittest
         run: python -m unittest discover -s tests/backend -p 'test_*.py' -t .

@@ -143,6 +143,8 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+Direct dependencies live in **`requirements.in`**; **`requirements.txt`** is the pinned lockfile (like `package-lock.json`). To add or bump a Python package, edit `requirements.in` and run `./scripts/compile-requirements.sh`.
+
 Create or extend a **`.env`** in the project root (`app.py` loads it via `python-dotenv`):
 
 ```env
@@ -199,7 +201,49 @@ Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backe
 
 More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/observability.md`, `docs/rag-indexing.md`, `docs/push-reminders.md`, `docs/weather-dashboard.md`, and `docs/portfolio-roadmap.md`).
 
-More detailed flows live in **`docs/`** (for example `docs/chat-assistant-flow.md`, `docs/rag-indexing.md`, `docs/observability.md`, `docs/push-reminders.md`, `docs/weather-dashboard.md`, and `docs/portfolio-roadmap.md`).
+## Dependency maintenance
+
+This project is set up for **low-touch upkeep** after you stop actively developing it:
+
+| Layer | Lockfile | Automated updates |
+|-------|----------|-------------------|
+| **npm (frontend)** | `package-lock.json` | [Dependabot](.github/dependabot.yml) — weekly PRs |
+| **pip (backend)** | `requirements.txt` (compiled from `requirements.in`) | Dependabot — weekly PRs |
+| **GitHub Actions** | workflow pins (`@v6`, etc.) | Dependabot — weekly PRs |
+
+**Dependabot** opens grouped pull requests every Monday. Each PR runs CI (tests, build, `npm audit`, `pip-audit`). Merge when green — no need to check manually unless a PR fails.
+
+**Adding a new Python dependency:** edit `requirements.in`, then:
+
+```bash
+./scripts/compile-requirements.sh
+```
+
+**Security checks in CI:** `pip-audit` runs on every push and PR (fails on known Python vulnerabilities). `npm audit --audit-level=high` also runs but is **advisory** until existing npm findings are cleared by Dependabot PRs — remove `continue-on-error` from [`.github/workflows/ci.yml`](.github/workflows/ci.yml) once the backlog is gone.
+
+**Production smoke tests:** [`.github/workflows/e2e.yml`](.github/workflows/e2e.yml) runs Playwright against the live GitHub Pages site daily.
+
+## Contributing
+
+Every pull request and push to **`main`** runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml). You should see two checks on GitHub:
+
+| Job | What it runs |
+|-----|----------------|
+| **frontend (Vitest + build)** | `npm audit`, `npm run test:run`, then `npm run build` |
+| **backend (unittest + offline eval)** | `pip-audit`, `python -m unittest discover -s tests/backend`, then `scripts/run_chat_eval.py` |
+
+No live API keys are required — CI clears `GEMINI_API_KEY`, `PINECONE_API_KEY`, and Langfuse keys; tests use mocks and the offline golden eval only exercises routing.
+
+**Before opening a PR**, from the repo root:
+
+```bash
+npm install
+npm run test:run
+npm run test:server
+npm run eval:chat
+```
+
+Python tests expect a venv with `pip install -r requirements.txt` (see [Local setup](#local-setup)); `npm run test:server` uses `.venv/bin/python` automatically.
 
 ## Environment variables reference
 

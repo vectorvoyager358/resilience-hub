@@ -1,0 +1,14 @@
+# Direct backend dependencies. Regenerate the lockfile with:
+#   ./scripts/compile-requirements.sh
+#
+# Backend API (`python -m server.app` → Flask + Pinecone)
+flask>=3.0,<4
+flask-cors>=6.0,<7
+python-dotenv>=1.0,<2
+pinecone>=6.0,<7
+gunicorn>=22.0,<24
+firebase-admin>=6.5,<7
+google-cloud-firestore>=2.16,<3
+google-genai>=1.0,<2
+cohere>=5.0,<6
+langfuse>=4.0,<5

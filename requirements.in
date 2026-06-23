@@ -5,7 +5,7 @@
 flask>=3.0,<4
 flask-cors>=6.0,<7
 python-dotenv>=1.0,<2
-pinecone>=6.0,<7
+pinecone>=9.1.0,<10
 gunicorn>=26.0.0,<27
 firebase-admin>=7.4.0,<8
 google-cloud-firestore>=2.16,<3

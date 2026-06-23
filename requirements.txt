@@ -32,7 +32,7 @@ click==8.4.1
     #   flask
     #   huggingface-hub
     #   typer
-cohere==5.21.1
+cohere==7.0.4
     # via -r requirements.in
 cryptography==49.0.0
     # via

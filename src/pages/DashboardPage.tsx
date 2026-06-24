@@ -427,8 +427,6 @@ const fuseOptions = {
   shouldSort: true,
   // Find all matches but limit to top 3
   findAllMatches: true,
-  // Token separators for better word matching
-  tokenize: true,
   matchAllTokens: false,
   // Support for multiple identical matches
   includeMatches: true,

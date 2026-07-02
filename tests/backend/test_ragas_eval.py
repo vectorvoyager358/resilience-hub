@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from evals.ragas_dataset import load_ragas_rows
@@ -16,6 +18,42 @@ from evals.ragas_runner import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RAGAS_DATASET = REPO_ROOT / "evals" / "ragas_recorded.jsonl"
+
+
+def _patch_ragas_modules() -> patch:
+    """Inject fake ragas schema types so CI need not install requirements-dev.txt."""
+    schema = MagicMock()
+
+    class FakeDataset:
+        def __init__(self, items: list[SimpleNamespace]) -> None:
+            self._items = items
+
+        @classmethod
+        def from_list(cls, items: list[dict[str, object]]) -> FakeDataset:
+            return cls([SimpleNamespace(**item) for item in items])
+
+        def __len__(self) -> int:
+            return len(self._items)
+
+        def __getitem__(self, index: int) -> SimpleNamespace:
+            return self._items[index]
+
+    class FakeSample:
+        def __init__(self, **kwargs: object) -> None:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    schema.EvaluationDataset = FakeDataset
+    schema.SingleTurnSample = FakeSample
+    ragas_pkg = MagicMock()
+    ragas_pkg.dataset_schema = schema
+    return patch.dict(
+        sys.modules,
+        {
+            "ragas": ragas_pkg,
+            "ragas.dataset_schema": schema,
+        },
+    )
 
 
 class RagasDatasetTest(unittest.TestCase):
@@ -35,22 +73,28 @@ class RagasDatasetTest(unittest.TestCase):
 class RagasRunnerTest(unittest.TestCase):
     def test_rows_to_ragas_dataset_avoids_hf_from_dict(self):
         rows = load_ragas_rows(RAGAS_DATASET)[:1]
-        dataset = _rows_to_ragas_dataset(rows)
+        with _patch_ragas_modules():
+            dataset = _rows_to_ragas_dataset(rows)
         self.assertEqual(len(dataset), 1)
         self.assertEqual(dataset[0].user_input, rows[0]["user_input"])
 
     def test_score_ragas_rows_uses_sync_scoring(self):
         rows = load_ragas_rows(RAGAS_DATASET)[:1]
 
-        with patch("evals.ragas_runner._build_ragas_models") as mock_models:
-            mock_models.return_value = (MagicMock(), MagicMock())
-            with patch(
-                "evals.ragas_runner._score_ragas_sample",
-                return_value=(0.9, 0.85),
-            ) as mock_score:
-                results, cost = score_ragas_rows(
-                    rows, min_faithfulness=0.5, min_answer_relevancy=0.5
-                )
+        with _patch_ragas_modules():
+            with patch("evals.ragas_runner._build_ragas_models") as mock_models:
+                mock_models.return_value = (MagicMock(), MagicMock())
+                with patch(
+                    "evals.ragas_runner._attach_ragas_metrics",
+                    return_value=(MagicMock(), MagicMock()),
+                ):
+                    with patch(
+                        "evals.ragas_runner._score_ragas_sample",
+                        return_value=(0.9, 0.85),
+                    ) as mock_score:
+                        results, cost = score_ragas_rows(
+                            rows, min_faithfulness=0.5, min_answer_relevancy=0.5
+                        )
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].status, "pass")

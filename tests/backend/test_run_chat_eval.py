@@ -12,7 +12,7 @@ RUNNER = REPO_ROOT / "scripts" / "run_chat_eval.py"
 PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 
 
-def _run_runner(*extra: str) -> subprocess.CompletedProcess[str]:
+def _run_runner(*extra: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     py = str(PYTHON if PYTHON.is_file() else sys.executable)
     return subprocess.run(
         [py, str(RUNNER), *extra],
@@ -20,6 +20,7 @@ def _run_runner(*extra: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 
@@ -34,10 +35,24 @@ class RunChatEvalScriptTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         self.assertIn("routing+mock_chat", result.stdout)
 
-    def test_live_flag_exits_nonzero(self):
+    def test_live_without_ragas_exits_nonzero(self):
         result = _run_runner("--live")
         self.assertEqual(result.returncode, 2)
-        self.assertIn("not implemented", result.stderr.lower())
+        self.assertIn("--live requires --ragas", result.stderr)
+
+    def test_ragas_missing_api_key_exits_nonzero(self):
+        import os
+
+        # Subprocess must not inherit .env keys: load_dotenv() only fills unset vars.
+        env = os.environ.copy()
+        env["RAGAS_API_KEY"] = ""
+        env["GEMINI_API_KEY"] = ""
+        env["GOOGLE_API_KEY"] = ""
+        result = _run_runner("--ragas", env=env)
+        if "requirements-dev.txt" in (result.stderr or ""):
+            self.assertEqual(result.returncode, 2)
+            return
+        self.assertNotEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
 
 if __name__ == "__main__":

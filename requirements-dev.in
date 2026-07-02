@@ -1,0 +1,7 @@
+# Nightly / local eval tooling (#82). Not installed in production Cloud Run image.
+# Regenerate lockfile: ./scripts/compile-requirements-dev.sh
+#
+-r requirements.in
+ragas>=0.3.2,<0.3.3
+langchain-google-genai>=2,<3
+langchain-community>=0.3,<0.4

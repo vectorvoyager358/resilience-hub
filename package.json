@@ -13,6 +13,8 @@
     "test:server": ".venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py' -t .",
     "eval:chat": ".venv/bin/python scripts/run_chat_eval.py",
     "eval:chat:mock": ".venv/bin/python scripts/run_chat_eval.py --mock-chat",
+    "eval:chat:ragas": ".venv/bin/python scripts/run_chat_eval.py --ragas",
+    "eval:chat:ragas:live": ".venv/bin/python scripts/run_chat_eval.py --live --ragas",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "lint": "eslint \"**/*.{ts,tsx}\" --max-warnings 0",

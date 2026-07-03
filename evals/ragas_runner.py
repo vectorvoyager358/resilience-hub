@@ -5,13 +5,16 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import re
 import sys
 import types
+from contextlib import ExitStack
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from evals.ragas_dataset import load_ragas_rows
 
@@ -33,6 +36,10 @@ class RagasCaseResult:
     answer_relevancy: float | None
     status: str  # "pass" | "fail"
     errors: list[str] = field(default_factory=list)
+    user_input: str | None = None
+    response: str | None = None
+    retrieved_contexts: list[str] | None = None
+    live_meta: dict[str, Any] | None = None
 
 
 @dataclass
@@ -65,6 +72,14 @@ class RagasReport:
                     "faithfulness": r.faithfulness,
                     "answerRelevancy": r.answer_relevancy,
                     "status": r.status,
+                    **({"userInput": r.user_input} if r.user_input else {}),
+                    **({"response": r.response} if r.response else {}),
+                    **(
+                        {"retrievedContexts": r.retrieved_contexts}
+                        if r.retrieved_contexts
+                        else {}
+                    ),
+                    **({"liveMeta": r.live_meta} if r.live_meta else {}),
                     **({"errors": r.errors} if r.errors else {}),
                 }
                 for r in self.results
@@ -109,6 +124,80 @@ def _ensure_live_app() -> Any:
     return importlib.import_module("server.app")
 
 
+_CONTEXT_LINE = re.compile(
+    r"^(?P<type>note|reflection) \((?P<date>[^)]+)\): (?P<content>.+)$",
+    re.I,
+)
+
+
+def contexts_to_pinecone_matches(row_id: str, contexts: list[str]) -> list[dict[str, Any]]:
+    """Turn recorded RAGAS contexts into Pinecone-style matches for live eval."""
+    matches: list[dict[str, Any]] = []
+    for i, raw in enumerate(contexts):
+        text = (raw or "").strip()
+        if not text:
+            continue
+        parsed = _CONTEXT_LINE.match(text)
+        if parsed:
+            type_label = parsed.group("type").lower()
+            date = parsed.group("date")
+            content = parsed.group("content")
+        else:
+            type_label = "note"
+            date = None
+            content = text
+        matches.append(
+            {
+                "id": f"{row_id}-ctx-{i}",
+                "score": 0.95 - i * 0.01,
+                "content": content,
+                "metadata": {
+                    "type": type_label,
+                    "date": date,
+                    "content": content,
+                },
+            }
+        )
+    return matches
+
+
+def _infer_eval_today(row: dict[str, Any]) -> date | None:
+    """Align prompt todayLocal with fixture note dates (eval live runs only)."""
+    explicit = row.get("eval_today_local")
+    if isinstance(explicit, str) and explicit.strip():
+        return date.fromisoformat(explicit.strip())
+    dates: list[date] = []
+    for raw in row.get("retrieved_contexts") or []:
+        parsed = _CONTEXT_LINE.match((raw or "").strip())
+        if not parsed:
+            continue
+        try:
+            dates.append(date.fromisoformat(parsed.group("date")))
+        except ValueError:
+            continue
+    if not dates:
+        return None
+    # Day after the newest memory → notes read as recent; "yesterday" aligns with that date.
+    return max(dates) + timedelta(days=1)
+
+
+def _fixture_user_doc_for_row(row: dict[str, Any]) -> dict[str, Any]:
+    base = dict(row.get("fixture_user_doc") or {})
+    base.setdefault("timezone", "UTC")
+    base.setdefault("challenges", [])
+    base.setdefault("dailyNotes", {})
+    return base
+
+
+def _patch_eval_today(eval_today: date, tz_name: str) -> patch:
+    tz = ZoneInfo(tz_name)
+
+    def _fixed(_user_doc: dict[str, Any]) -> tuple[ZoneInfo, date, str]:
+        return tz, eval_today, tz_name
+
+    return patch("server.assistant_facts.get_user_timezone_and_today", _fixed)
+
+
 def _contexts_from_chat_body(body: dict[str, Any]) -> list[str]:
     contexts: list[str] = []
     for source in body.get("sources") or []:
@@ -132,7 +221,16 @@ def collect_live_responses(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     updated: list[dict[str, Any]] = []
 
     # Route live chat Gemini calls through the eval key (isolated from prod GEMINI_API_KEY).
-    with patch.dict(os.environ, {"GEMINI_API_KEY": key, "GOOGLE_API_KEY": key}, clear=False):
+    with patch.dict(
+        os.environ,
+        {
+            "GEMINI_API_KEY": key,
+            "GOOGLE_API_KEY": key,
+            "COHERE_API_KEY": "",
+            "RERANK_ENABLED": "off",
+        },
+        clear=False,
+    ):
         updated = _collect_live_responses_with_client(rows, client)
     return updated
 
@@ -143,25 +241,49 @@ def _collect_live_responses_with_client(
     updated: list[dict[str, Any]] = []
 
     for row in rows:
-        user_doc = row.get("fixture_user_doc") or {"challenges": [], "dailyNotes": {}}
+        user_doc = _fixture_user_doc_for_row(row)
+        eval_today = _infer_eval_today(row)
+        tz_name = str(user_doc.get("timezone") or "UTC")
         history = row.get("history") or []
         payload: dict[str, Any] = {"message": row["user_input"]}
         if history:
             payload["conversationHistory"] = history
 
-        with patch(
-            "server.routes.chat.verify_bearer_uid_and_email_verified",
-            return_value=("eval-user", True),
-        ):
-            with patch("server.routes.chat.firestore.Client") as mock_fs:
-                mock_fs.return_value.collection.return_value.document.return_value.get.return_value = (
-                    types.SimpleNamespace(exists=True, to_dict=lambda: user_doc)
+        fake_matches = contexts_to_pinecone_matches(row["id"], row["retrieved_contexts"])
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "server.routes.chat.verify_bearer_uid_and_email_verified",
+                    return_value=("eval-user", True),
                 )
-                response = client.post(
-                    "/api/chat-assistant",
-                    json=payload,
-                    headers={"Authorization": "Bearer eval-token"},
+            )
+            mock_fs = stack.enter_context(patch("server.routes.chat.firestore.Client"))
+            mock_fs.return_value.collection.return_value.document.return_value.get.return_value = (
+                types.SimpleNamespace(exists=True, to_dict=lambda: user_doc)
+            )
+            stack.enter_context(
+                patch(
+                    "server.routes.chat._pinecone_matches_for_user",
+                    return_value=fake_matches,
                 )
+            )
+            if eval_today:
+                stack.enter_context(_patch_eval_today(eval_today, tz_name))
+                stack.enter_context(
+                    patch(
+                        "server.chat_context.get_user_timezone_and_today",
+                        side_effect=lambda _ud, d=eval_today, t=tz_name: (
+                            ZoneInfo(t),
+                            d,
+                            t,
+                        ),
+                    )
+                )
+            response = client.post(
+                "/api/chat-assistant",
+                json=payload,
+                headers={"Authorization": "Bearer eval-token"},
+            )
 
         if response.status_code != 200:
             raise RuntimeError(f"live chat failed for {row['id']}: HTTP {response.status_code}")
@@ -171,15 +293,11 @@ def _collect_live_responses_with_client(
         if not isinstance(reply, str) or not reply.strip():
             raise RuntimeError(f"live chat returned empty reply for {row['id']}")
 
-        contexts = _contexts_from_chat_body(body)
-        if not contexts:
-            contexts = list(row["retrieved_contexts"])
-
         updated.append(
             {
                 **row,
                 "response": reply.strip(),
-                "retrieved_contexts": contexts,
+                "retrieved_contexts": list(row["retrieved_contexts"]),
                 "live_meta": body.get("meta") or {},
             }
         )
@@ -292,6 +410,10 @@ def _case_result_from_scores(
         answer_relevancy=ar_score,
         status="fail" if errors else "pass",
         errors=errors,
+        user_input=row.get("user_input"),
+        response=row.get("response"),
+        retrieved_contexts=list(row.get("retrieved_contexts") or []),
+        live_meta=row.get("live_meta"),
     )
 
 

@@ -55,6 +55,13 @@ def _print_ragas_report(report, report_path: Path, *, verbose: bool) -> int:
                 f"  [{mark}] {row.id} "
                 f"f={row.faithfulness} ar={row.answer_relevancy}"
             )
+            if row.user_input:
+                print(f"         Q: {row.user_input}")
+            if row.response:
+                preview = row.response.replace("\n", " ")
+                if len(preview) > 200:
+                    preview = preview[:197] + "..."
+                print(f"         A: {preview}")
             for err in row.errors:
                 print(f"         {err}")
 

@@ -249,7 +249,7 @@ Rough cost drivers per chat request:
 
 **In-app caps:** UID + IP rate limits reduce runaway spend. **Langfuse** can show generation counts and latency; use GCP billing + provider dashboards for dollar amounts.
 
-**Offline eval cost:** see [`evals/README.md`](../evals/README.md) before running live golden evals.
+**Offline eval cost:** see [`evals/README.md`](../evals/README.md) before running live golden evals. RAGAS reference baseline: [`evals/ragas_baseline.json`](../evals/ragas_baseline.json).
 
 ---
 

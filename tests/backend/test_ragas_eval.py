@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -11,8 +12,12 @@ from unittest.mock import MagicMock, patch
 from evals.ragas_dataset import load_ragas_rows
 from evals.ragas_runner import (
     RagasCaseResult,
+    _collect_live_responses_with_client,
+    _ensure_live_app,
+    _infer_eval_today,
     _rows_to_ragas_dataset,
     build_ragas_report,
+    contexts_to_pinecone_matches,
     score_ragas_rows,
 )
 
@@ -71,6 +76,32 @@ class RagasDatasetTest(unittest.TestCase):
 
 
 class RagasRunnerTest(unittest.TestCase):
+    def test_infer_eval_today_from_newest_memory(self):
+        rows = load_ragas_rows(RAGAS_DATASET)
+        by_id = {r["id"]: r for r in rows}
+        self.assertEqual(_infer_eval_today(by_id["ragas-005"]).isoformat(), "2026-01-21")
+        self.assertEqual(_infer_eval_today(by_id["ragas-003"]).isoformat(), "2026-01-16")
+
+    def test_contexts_to_pinecone_matches_parses_recorded_format(self):
+        rows = load_ragas_rows(RAGAS_DATASET)[:1]
+        matches = contexts_to_pinecone_matches(rows[0]["id"], rows[0]["retrieved_contexts"])
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["metadata"]["type"], "note")
+        self.assertIn("missed my morning run", matches[0]["content"])
+
+    def test_live_collection_uses_stubbed_retrieval(self):
+        rows = load_ragas_rows(RAGAS_DATASET)[:1]
+        app_module = _ensure_live_app()
+        client = app_module.app.test_client()
+        with patch(
+            "server.routes.chat.generate_chat_reply",
+            return_value="You logged a setback and walked the next evening [1].",
+        ):
+            updated = _collect_live_responses_with_client(rows, client)
+        self.assertIn("[1]", updated[0]["response"])
+        self.assertEqual(len(updated[0]["retrieved_contexts"]), 1)
+        self.assertTrue((updated[0].get("live_meta") or {}).get("usedRag"))
+
     def test_rows_to_ragas_dataset_avoids_hf_from_dict(self):
         rows = load_ragas_rows(RAGAS_DATASET)[:1]
         with _patch_ragas_modules():
@@ -99,8 +130,37 @@ class RagasRunnerTest(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].status, "pass")
         self.assertEqual(results[0].faithfulness, 0.9)
+        self.assertEqual(results[0].response, rows[0]["response"])
         self.assertIsNone(cost)
         mock_score.assert_called_once()
+
+    def test_report_includes_scored_content(self):
+        results = [
+            RagasCaseResult(
+                id="ragas-001",
+                golden_id="rag-001",
+                faithfulness=0.3,
+                answer_relevancy=0.9,
+                status="fail",
+                errors=["faithfulness: 0.300 < 0.5"],
+                user_input="What did I write?",
+                response="You logged a setback [1].",
+                retrieved_contexts=["note (2026-01-14): setback text"],
+            )
+        ]
+        report = build_ragas_report(
+            mode="ragas",
+            dataset_path=RAGAS_DATASET,
+            results=results,
+            judge_model="gemini-2.5-flash-lite",
+            min_faithfulness=0.5,
+            min_answer_relevancy=0.5,
+            estimated_cost_usd=None,
+        )
+        row = report.to_dict()["results"][0]
+        self.assertEqual(row["userInput"], "What did I write?")
+        self.assertEqual(row["response"], "You logged a setback [1].")
+        self.assertEqual(row["retrievedContexts"], ["note (2026-01-14): setback text"])
 
     def test_build_report_flags_low_scores(self):
         results = [

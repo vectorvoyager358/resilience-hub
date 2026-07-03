@@ -195,6 +195,8 @@ Vite defaults to **5173** and proxies **`/api`** to **`http://localhost:5001`** 
 - `npm test` / `npm run test:run` — Vitest unit tests (`tests/frontend/`)
 - `npm run test:server` — Flask/Python `unittest` (`tests/backend/`; uses `.venv/bin/python` like `server:dev`, from repo root)
 - `npm run eval:chat` — offline chat golden eval (routing only, no API keys); `npm run eval:chat:mock` adds stubbed endpoint checks — see [`evals/README.md`](evals/README.md)
+- `npm run eval:chat:ragas` — RAGAS faithfulness + relevancy on recorded subset (paid; `RAGAS_API_KEY`, `requirements-dev.txt`)
+- `npm run eval:chat:ragas:live` — refresh answers via live chat, then RAGAS score — see [`evals/README.md`](evals/README.md) and [`evals/ragas_baseline.json`](evals/ragas_baseline.json)
 - `npm run e2e` — Playwright smoke tests (`tests/e2e/`)
 
 Automated tests live under **`tests/`**: `tests/frontend` (Vitest), `tests/backend` (Python), `tests/e2e` (Playwright).
@@ -245,7 +247,7 @@ npm run eval:chat
 
 Python tests expect a venv with `pip install -r requirements.txt` (see [Local setup](#local-setup)); `npm run test:server` uses `.venv/bin/python` automatically.
 
-## Environment variables reference
+**Optional (paid, pre-release):** RAGAS quality eval — `pip install -r requirements-dev.txt`, set `RAGAS_API_KEY`, then `npm run eval:chat:ragas` or `npm run eval:chat:ragas:live -- --verbose`. Baseline and gates: [`evals/ragas_baseline.json`](evals/ragas_baseline.json), full guide: [`evals/README.md`](evals/README.md).
 
 **Frontend (Vite — `VITE_*` is exposed to the browser):**
 

@@ -8,7 +8,7 @@
 {"id": "rag-008", "message": "How do I feel about my progress?", "history": [], "expect_rag": true, "notes": "Sentiment / self-report in past notes."}
 {"id": "rag-009", "message": "Show me my journal entries.", "history": [], "expect_rag": true, "notes": "Explicit journal browse intent."}
 {"id": "rag-010", "message": "What have I written about running?", "history": [], "expect_rag": true, "notes": "Topic recall across notes."}
-{"id": "rag-011", "message": "How much did I spend on Instagram yesterday?", "history": [], "expect_rag": true, "notes": "Quantitative recall from a specific day (memory beats aggregate-fact router)."}
+{"id": "rag-011", "message": "How much did I spend on Instagram yesterday?", "history": [], "expect_rag": true, "notes": "Quantitative recall from a specific day (logged screen-time minutes; 'spend' is user phrasing, not dollars)."}
 {"id": "rag-012", "message": "What did I write about anxiety last month?", "history": [], "expect_rag": true, "notes": "Time-bounded memory query (extended beyond RagRoutingTest)."}
 {"id": "rag-013", "message": "Summarize my journal from the past month.", "history": [], "expect_rag": true, "notes": "Longer-window journal synthesis."}
 {"id": "rag-014", "message": "Remember what I wrote about cold showers?", "history": [], "expect_rag": true, "notes": "Remember + wrote-about pattern."}

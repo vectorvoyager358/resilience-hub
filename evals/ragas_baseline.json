@@ -1,0 +1,65 @@
+{
+  "description": "Reference RAGAS baseline for regression gates (#89). Captured from a green live+ragas run on chat_v1.",
+  "capturedAt": "2026-07-03T00:15:48.302453+00:00",
+  "mode": "live+ragas",
+  "dataset": "evals/ragas_recorded.jsonl",
+  "promptVersion": "chat_v1",
+  "judgeModel": "gemini-2.5-flash-lite",
+  "perCaseThresholds": {
+    "minFaithfulness": 0.5,
+    "minAnswerRelevancy": 0.5
+  },
+  "baselineSummary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "meanFaithfulness": 1.0,
+    "meanAnswerRelevancy": 0.8968
+  },
+  "proposedNightlyGates": {
+    "routingGoldenPassRate": 1.0,
+    "ragasRecordedPassRate": 1.0,
+    "ragasLiveMinPassRate": 0.83,
+    "ragasLiveMinMeanFaithfulness": 0.85,
+    "ragasLiveMinMeanAnswerRelevancy": 0.7,
+    "notes": "Live RAGAS is LLM-judged and can vary run-to-run; use thresholds + trends, not 100% every night."
+  },
+  "cases": [
+    {
+      "id": "ragas-001",
+      "goldenId": "rag-001",
+      "faithfulness": 1.0,
+      "answerRelevancy": 0.8700475882707948
+    },
+    {
+      "id": "ragas-002",
+      "goldenId": "rag-003",
+      "faithfulness": 1.0,
+      "answerRelevancy": 0.8678528662249844
+    },
+    {
+      "id": "ragas-003",
+      "goldenId": "rag-005",
+      "faithfulness": 1.0,
+      "answerRelevancy": 0.9126093341153737
+    },
+    {
+      "id": "ragas-004",
+      "goldenId": "rag-009",
+      "faithfulness": 1.0,
+      "answerRelevancy": 0.9366831523189215
+    },
+    {
+      "id": "ragas-005",
+      "goldenId": "rag-011",
+      "faithfulness": 1.0,
+      "answerRelevancy": 0.9244059101010466
+    },
+    {
+      "id": "ragas-006",
+      "goldenId": "rag-014",
+      "faithfulness": 1.0,
+      "answerRelevancy": 0.8692907492666029
+    }
+  ]
+}

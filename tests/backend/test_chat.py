@@ -630,8 +630,27 @@ class BuildSystemPromptTest(unittest.TestCase):
         self.assertIn("Retrieved memories", prompt)
         self.assertIn("[1] note (2026-03-01): Logged cold shower.", prompt)
 
+    def test_quantitative_recall_rule_in_prompt(self):
+        from server.routes.chat import _build_system_prompt, _format_numbered_rag_block
 
-class BuildChatResponseMetaTest(unittest.TestCase):
+        rag_block = _format_numbered_rag_block(
+            [
+                {
+                    "content": "Screen log — Instagram 47 minutes yesterday evening.",
+                    "metadata": {"type": "note", "date": "2026-01-20"},
+                }
+            ]
+        )
+        prompt, _version = _build_system_prompt(
+            assistant_facts={"challenges": {"activeCount": 0}},
+            context_json='{"todayLocal":"2026-01-21","yesterdayLocal":"2026-01-20"}',
+            rag_block=rag_block,
+            history_lines="(none)",
+            user_message="How much did I spend on Instagram yesterday?",
+        )
+        self.assertIn("Quantitative recall", prompt)
+        self.assertIn("Forbidden", prompt)
+        self.assertIn("You logged 47 minutes on Instagram yesterday evening", prompt)
     """Quality proxy meta fields (#85)."""
 
     def test_empty_retrieval_when_rag_and_no_hits(self):

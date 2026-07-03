@@ -71,7 +71,7 @@ def generate_chat_reply(prompt: str) -> str:
         model=_CHAT_MODEL,
         contents=prompt,
         config=types.GenerateContentConfig(
-            temperature=0.7,
+            temperature=0.3,
             max_output_tokens=350,
             top_k=40,
             top_p=0.95,

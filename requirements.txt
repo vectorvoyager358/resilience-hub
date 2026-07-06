@@ -32,7 +32,7 @@ click==8.4.1
     #   flask
     #   huggingface-hub
     #   typer
-cohere==7.0.4
+cohere==7.0.5
     # via -r requirements.in
 cryptography==49.0.0
     # via
@@ -44,7 +44,7 @@ fastavro==1.12.2
     # via cohere
 filelock==3.29.4
     # via huggingface-hub
-firebase-admin==7.4.0
+firebase-admin==7.5.0
     # via -r requirements.in
 flask==3.1.3
     # via
@@ -71,7 +71,7 @@ google-cloud-core==2.6.0
     # via
     #   google-cloud-firestore
     #   google-cloud-storage
-google-cloud-firestore==2.27.0
+google-cloud-firestore==2.28.0
     # via
     #   -r requirements.in
     #   firebase-admin
@@ -81,7 +81,7 @@ google-crc32c==1.8.0
     # via
     #   google-cloud-storage
     #   google-resumable-media
-google-genai==2.9.0
+google-genai==2.10.0
     # via -r requirements.in
 google-resumable-media==2.10.0
     # via google-cloud-storage
@@ -130,7 +130,7 @@ itsdangerous==2.2.0
     # via flask
 jinja2==3.1.6
     # via flask
-langfuse==4.10.0
+langfuse==4.13.0
     # via -r requirements.in
 markdown-it-py==4.2.0
     # via rich

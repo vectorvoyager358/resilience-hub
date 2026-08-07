@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install
@@ -29,7 +29,7 @@ jobs:
         run: npm install --no-audit --no-fund --save-dev @rollup/rollup-linux-x64-gnu
 
       - name: npm audit (high and critical)
-        run: npm audit --audit-level=high
+        run: npm run audit:ci
 
       - name: Test
         run: npm run test:run
@@ -66,4 +66,3 @@ jobs:
 
       - name: Offline chat eval (golden routing)
         run: python scripts/run_chat_eval.py
-

@@ -34,7 +34,7 @@ click==8.4.1
     #   typer
 cohere==7.0.4
     # via -r requirements.in
-cryptography==49.0.0
+cryptography==50.0.0
     # via
     #   google-auth
     #   pyjwt

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from tests.backend.test_chat import _load_app
 
@@ -19,7 +20,8 @@ class WeatherRouteTest(unittest.TestCase):
         mock_verify.return_value = "uid1"
 
         def fake_get(url: str, **_kwargs):
-            if "api.open-meteo.com" in url:
+            host = urlparse(url).hostname
+            if host == "api.open-meteo.com":
                 return {
                     "timezone": "Europe/Berlin",
                     "current": {
@@ -55,7 +57,8 @@ class WeatherRouteTest(unittest.TestCase):
         mock_verify.return_value = "uid1"
 
         def fake_get(url: str, **_kwargs):
-            if "api.open-meteo.com" in url:
+            host = urlparse(url).hostname
+            if host == "api.open-meteo.com":
                 return {
                     "timezone": "America/Los_Angeles",
                     "current": {
@@ -86,7 +89,8 @@ class WeatherRouteTest(unittest.TestCase):
         mock_verify.return_value = "uid1"
 
         def fake_get(url: str, **_kwargs):
-            if "api.open-meteo.com" in url:
+            host = urlparse(url).hostname
+            if host == "api.open-meteo.com":
                 self.assertIn("is_day", url)
                 return {
                     "timezone": "UTC",
@@ -117,7 +121,8 @@ class WeatherRouteTest(unittest.TestCase):
         mock_verify.return_value = "uid1"
 
         def fake_get(url: str, **_kwargs):
-            if "api.open-meteo.com" in url:
+            host = urlparse(url).hostname
+            if host == "api.open-meteo.com":
                 return {
                     "timezone": "UTC",
                     "current": {

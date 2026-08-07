@@ -54,12 +54,15 @@ class _FakeIndex:
     def __init__(self):
         self.upserts = []
         self.deletes = []
+        self.operations = []
 
     def upsert(self, vectors):
         self.upserts.append(vectors)
+        self.operations.append("upsert")
 
     def delete(self, ids=None):
         self.deletes.append(list(ids or []))
+        self.operations.append("delete")
 
     def query(self, **_kwargs):
         return types.SimpleNamespace(matches=[])
@@ -106,6 +109,27 @@ class IndexContentChunksTest(unittest.TestCase):
         self.assertEqual(first_meta.get("parent_id"), "uid-a-note-ch1-1")
         self.assertEqual(first_meta.get("chunk_index"), 0)
         self.assertEqual(first_meta.get("chunk_count"), count)
+        self.assertEqual(fake.operations[0], "upsert")
+        self.assertIn("delete", fake.operations[1:])
+
+    def test_embedding_failure_preserves_existing_vectors(self):
+        from server.index_content import index_content_chunks
+
+        fake = _FakeIndex()
+        with patch(
+            "server.gemini_client.embed_document_text",
+            side_effect=RuntimeError("embedding_failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                index_content_chunks(
+                    fake,
+                    uid="uid-a",
+                    content="Keep the previous indexed note if this fails.",
+                    metadata={"type": "note", "challengeId": "ch1", "dayNumber": 1},
+                )
+
+        self.assertEqual(fake.upserts, [])
+        self.assertEqual(fake.deletes, [])
 
 
 if __name__ == "__main__":

@@ -36,6 +36,10 @@ vi.mock('../../../src/utils/api', () => ({
   tryDeleteFromPinecone: vi.fn(),
   deleteFromPinecone: vi.fn(),
   updatePineconeNote: (...args: unknown[]) => updatePineconeNoteMock(...args),
+  pineconeReflectionParentId: (uid: string, date: string) => `${uid}-reflection-${date}`,
+  pineconeNoteParentId: (uid: string, challengeId: string, day: number) =>
+    `${uid}-note-${challengeId}-${day}`,
+  isOwnedPineconeVectorId: (uid: string, vectorId: string) => vectorId.startsWith(`${uid}-`),
 }));
 
 vi.mock('../../../src/components/TypingAnimation', () => ({ default: () => null }));

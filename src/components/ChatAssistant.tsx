@@ -30,6 +30,7 @@ import { isChallengePastCalendarDuration } from '../utils/challengeProgress';
 import { apiUrl } from '../utils/apiBase';
 import { auth } from '../services/firebase';
 import { livelyMenuFabSx } from '../styles/livelyMenuFab';
+import { loadChatSession, saveChatSession } from '../utils/chatStorage';
 
 /** One retrieved memory returned by `/api/chat-assistant` (`sources[]`). */
 export interface ChatRetrievalSource {
@@ -244,20 +245,6 @@ function AssistantMessageBody({
   );
 }
 
-const CHAT_STORAGE_VERSION = 1;
-
-function chatStorageKey(uid: string): string {
-  return `resilience-hub-assistant-chat:v${CHAT_STORAGE_VERSION}:${uid}`;
-}
-
-type PersistedMessage = Omit<Message, 'timestamp'> & { timestamp: string };
-
-interface PersistedChatPayload {
-  v: typeof CHAT_STORAGE_VERSION;
-  open: boolean;
-  messages: PersistedMessage[];
-}
-
 function parseStoredMessages(data: unknown): Message[] {
   if (!Array.isArray(data)) return [];
   const out: Message[] = [];
@@ -287,18 +274,8 @@ function parseStoredMessages(data: unknown): Message[] {
 }
 
 function loadPersistedChat(uid: string): { open: boolean; messages: Message[] } | null {
-  if (typeof window === 'undefined' || !uid) return null;
-  try {
-    const raw = window.localStorage.getItem(chatStorageKey(uid));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedChatPayload;
-    if (parsed.v !== CHAT_STORAGE_VERSION || typeof parsed.open !== 'boolean') return null;
-    if (!Array.isArray(parsed.messages)) return null;
-    const messages = parseStoredMessages(parsed.messages);
-    return { open: parsed.open, messages };
-  } catch {
-    return null;
-  }
+  const parsed = loadChatSession(uid);
+  return parsed ? { open: parsed.open, messages: parseStoredMessages(parsed.messages) } : null;
 }
 
 // Function to convert markdown to plain text
@@ -545,8 +522,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   useEffect(() => {
     if (typeof window === 'undefined' || !userData.uid) return;
     try {
-      const payload: PersistedChatPayload = {
-        v: CHAT_STORAGE_VERSION,
+      saveChatSession(userData.uid, {
         open,
         messages: messages.map((m) => ({
           id: m.id,
@@ -554,8 +530,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
           sender: m.sender,
           timestamp: m.timestamp.toISOString(),
         })),
-      };
-      window.localStorage.setItem(chatStorageKey(userData.uid), JSON.stringify(payload));
+      });
     } catch (e) {
       console.warn('[ChatAssistant] Failed to persist chat', e);
     }
@@ -644,7 +619,7 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
       });
 
       const rawText = await response.text();
-      let data: { reply?: string; sources?: unknown; error?: string; detail?: string } = {};
+      let data: { reply?: string; sources?: unknown; error?: string } = {};
       if (rawText.trim()) {
         try {
           data = JSON.parse(rawText) as typeof data;
@@ -665,9 +640,6 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
         }
         if (response.status === 503) {
           throw new Error('model');
-        }
-        if (response.status === 500 && data.detail) {
-          console.error('[ChatAssistant] Server error:', data.detail);
         }
         throw new Error(data.error || 'request');
       }
@@ -1127,4 +1099,4 @@ const ChatAssistant: React.FC<ChatAssistantProps> = ({ userData }) => {
   );
 };
 
-export default ChatAssistant; 
+export default ChatAssistant;

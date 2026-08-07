@@ -14,6 +14,10 @@
 {"id": "rag-014", "message": "Remember what I wrote about cold showers?", "history": [], "expect_rag": true, "notes": "Remember + wrote-about pattern."}
 {"id": "rag-015", "message": "Show me what I wrote yesterday about Instagram.", "history": [], "expect_rag": true, "notes": "Yesterday + wrote-about; day-specific note recall."}
 {"id": "rag-hist-001", "message": "What did I say about my sleep challenge?", "history": [{"role": "user", "content": "Summarize my notes from the past week."}, {"role": "assistant", "content": "You mentioned sleeping better after reducing screen time."}], "expect_rag": true, "notes": "Multi-turn case; routing uses current message only (history for future prompt evals)."}
+{"id": "rag-016", "message": "Tell me about my running progress.", "history": [], "expect_rag": true, "notes": "Natural topic recall without explicit write/note wording."}
+{"id": "rag-017", "message": "What was my experience with meditation?", "history": [], "expect_rag": true, "notes": "Experience recall should search narrative memories."}
+{"id": "rag-018", "message": "Have I mentioned feeling burned out?", "history": [], "expect_rag": true, "notes": "Search prior personal mentions."}
+{"id": "rag-019", "message": "According to my logs, what helped my sleep?", "history": [], "expect_rag": true, "notes": "Explicitly grounded request phrased as logs."}
 {"id": "facts-001", "message": "How many challenges do I have?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Count must come from authoritative facts JSON, not retrieved memories."}
 {"id": "facts-002", "message": "What percent complete am I?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Progress stats belong in facts; no semantic search needed."}
 {"id": "facts-003", "message": "What is the total count of my challenges?", "history": [], "expect_rag": false, "forbid_stats_from_memories": true, "notes": "Total count phrasing; facts-only routing."}

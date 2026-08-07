@@ -1,0 +1,15 @@
+{
+  "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
+  "high": true,
+  "package-manager": "npm",
+  "report-type": "summary",
+  "allowlist": [
+    {
+      "GHSA-qwww-vcr4-c8h2": {
+        "active": true,
+        "notes": "React Router RSC-only CSRF advisory. This app uses declarative SPA routing and does not use the unstable RSC APIs. Remove after upgrading to React Router 8.3+.",
+        "expiry": "2026-11-07T00:00:00Z"
+      }
+    }
+  ]
+}

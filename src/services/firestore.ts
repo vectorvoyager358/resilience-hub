@@ -1,5 +1,6 @@
 import { 
   doc, 
+  getDoc,
   setDoc, 
   updateDoc, 
   // deleteDoc,
@@ -10,8 +11,6 @@ import {
   // orderBy,
   // limit,
   // Timestamp,
-  onSnapshot,
-  DocumentSnapshot
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { User, Challenge } from '../types';
@@ -51,28 +50,14 @@ export const ensureUserDocumentShell = async (uid: string, displayName: string) 
   }
 };
 
-export const getUserData = (userId: string): Promise<User | null> => {
-  return new Promise((resolve, reject) => {
-    const userRef = doc(db, 'users', userId);
-    
-    const unsubscribe = onSnapshot(userRef, 
-      (doc: DocumentSnapshot) => {
-        if (doc.exists()) {
-          const data = doc.data() as User;
-          resolve(data);
-        } else {
-          resolve(null);
-        }
-      },
-      (error) => {
-        console.error('Error getting user data:', error);
-        reject(error);
-      }
-    );
-
-    // Return unsubscribe function to clean up the listener
-    return unsubscribe;
-  });
+export const getUserData = async (userId: string): Promise<User | null> => {
+  try {
+    const snapshot = await getDoc(doc(db, 'users', userId));
+    return snapshot.exists() ? snapshot.data() as User : null;
+  } catch (error) {
+    console.error('Error getting user data:', error);
+    throw error;
+  }
 };
 
 export const updateUserData = async (uid: string, data: Partial<User>) => {
@@ -180,4 +165,4 @@ export const deleteUserChallenge = async (uid: string, challengeId: string) => {
     console.error('Error deleting challenge:', error);
     throw error;
   }
-}; 
+};

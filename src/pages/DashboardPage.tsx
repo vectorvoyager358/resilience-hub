@@ -111,6 +111,13 @@ import {
   formatCadenceLabel,
   type ChallengeCadence,
 } from '../utils/challengeProgress';
+import {
+  celsiusToFahrenheitOneDecimal,
+  getLocalDateKey,
+  reflectionWeatherDisplayEmojis,
+  toTitleCase,
+  type ReflectionWeatherApiPayload,
+} from '../utils/dashboardDisplay';
 
 /** On menu FAB hover, one letter at a time cycles (C → h → a → …), 1s per letter. */
 const CHALLENGE_MENU_WORD = 'Challenge';
@@ -120,67 +127,6 @@ const WELCOME_HEADLINE_GRADIENT =
 
 /** Collapsed height for Today's Reflection body text (line-clamp). */
 const DAILY_REFLECTION_PREVIEW_LINE_CLAMP = 4;
-
-function celsiusToFahrenheitOneDecimal(c: number): number {
-  return Math.round((c * (9 / 5) + 32) * 10) / 10;
-}
-
-/** When `/api/weather` omits `emojis` (older server), infer day/night from `observationTimeLocal`. */
-function inferIsDayFromLocalClock(timeLocal: string | null | undefined): boolean | null {
-  if (timeLocal == null || typeof timeLocal !== 'string') return null;
-  const m = /^(\d{1,2}):(\d{2})/.exec(timeLocal.trim());
-  if (!m) return null;
-  const h = Number(m[1]);
-  if (!Number.isFinite(h) || h < 0 || h > 23) return null;
-  return h >= 6 && h < 19;
-}
-
-function coerceWeatherIsDay(
-  raw: unknown,
-  observationTimeLocal: string | null | undefined
-): boolean {
-  if (raw === false || raw === 0 || raw === '0') return false;
-  if (raw === true || raw === 1 || raw === '1') return true;
-  const inferred = inferIsDayFromLocalClock(observationTimeLocal);
-  if (inferred !== null) return inferred;
-  return true;
-}
-
-/** Same rules as `server.routes.weather._weather_display_emojis` — used only when API has no `emojis`. */
-function reflectionWeatherEmojis(isDay: boolean, weatherCode: number): string {
-  const period = isDay ? '🌞' : '🌙';
-  const code = weatherCode;
-
-  if (code === 45 || code === 48) return `${period}🌫️`;
-  if ([51, 53, 55, 56, 57].includes(code)) return `${period}🌦️`;
-  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return `${period}🌧️`;
-  if ([71, 73, 75, 77, 85, 86].includes(code)) return `${period}❄️`;
-  if ([95, 96, 99].includes(code)) return `${period}⛈️`;
-
-  if (code === 0) return isDay ? '🌞' : '🌙✨';
-  if (code === 1) return `${period}🌤️`;
-  if (code === 2) return `${period}⛅`;
-  if (code === 3) return `${period}☁️`;
-  return `${period}🌡️`;
-}
-
-type ReflectionWeatherApiPayload = {
-  temperatureC: number;
-  weatherCode: number;
-  isDay?: boolean | number;
-  observationTimeLocal?: string | null;
-  emojis?: string;
-};
-
-/** Prefer server `emojis`; if missing (stale Flask), match server rules client-side. */
-function reflectionWeatherDisplayEmojis(w: ReflectionWeatherApiPayload): string {
-  const fromApi = typeof w.emojis === 'string' ? w.emojis.trim() : '';
-  if (fromApi) return fromApi;
-  return reflectionWeatherEmojis(
-    coerceWeatherIsDay(w.isDay, w.observationTimeLocal ?? null),
-    w.weatherCode
-  );
-}
 
 const DAILY_DURATION_MIN = 10;
 const DAILY_DURATION_MAX = 365;
@@ -250,12 +196,6 @@ const milestones: MilestoneAchievement[] = [
 
 
 
-function toTitleCase(str: string) {
-  return str.split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-}
-
 // ErrorBoundary component to catch errors in child components
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
   constructor(props: { children: React.ReactNode }) {
@@ -287,13 +227,6 @@ const ScrollToTop: React.FC = () => {
   
   return null;
 };
-
-function getLocalDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 // Define categories with keywords and icons
 const iconCategories = [
@@ -3627,4 +3560,4 @@ const DashboardPage: React.FC = () => {
   );
 };
 
-export default DashboardPage; 
+export default DashboardPage;

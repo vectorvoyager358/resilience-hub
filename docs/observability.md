@@ -219,6 +219,14 @@ Authoritative list: [`.env.example`](../.env.example).
 |----------|---------|
 | `CHAT_UID_RATE_CAPACITY`, `CHAT_UID_RATE_REFILL_PER_SEC` | Per-user token bucket |
 | `CHAT_IP_RATE_CAPACITY`, `CHAT_IP_RATE_REFILL_PER_SEC` | Per-IP token bucket |
+| `RATE_LIMIT_BACKEND` | `memory` (default) or shared transactional `firestore` |
+| `RATE_LIMIT_FAIL_OPEN` | Shared-backend failure policy; default `false` denies requests |
+
+For multi-instance Cloud Run, use `RATE_LIMIT_BACKEND=firestore` and enable a
+Firestore TTL policy on the `_rate_limits` collection's `expiresAt` field.
+Bucket document IDs are SHA-256 hashes of scope and caller key, so UIDs and IPs
+are not stored as document names. The default memory backend remains preferable
+for local development because it adds no network request to each rate check.
 
 ---
 

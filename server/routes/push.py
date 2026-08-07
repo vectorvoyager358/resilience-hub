@@ -19,7 +19,7 @@ from google.cloud import firestore
 
 from server.auth_util import require_uid
 from server.firebase_util import init_firebase_admin
-from server.rate_limit import TokenBucketLimiter
+from server.rate_limit import create_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,9 @@ push_routes = Blueprint("push", __name__)
 
 _RATE_CAPACITY = int(os.environ.get("PUSH_RATE_CAPACITY", "10"))
 _RATE_REFILL = float(os.environ.get("PUSH_RATE_REFILL_PER_SEC", "0.2"))
-_limiter = TokenBucketLimiter(capacity=_RATE_CAPACITY, refill_per_second=_RATE_REFILL)
+_limiter = create_rate_limiter(
+    scope="push-uid", capacity=_RATE_CAPACITY, refill_per_second=_RATE_REFILL
+)
 
 # FCM tokens are typically 140-300 base64-ish chars. Be generous but bounded.
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_:\-]{20,4096}$")

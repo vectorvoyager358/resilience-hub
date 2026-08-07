@@ -850,6 +850,17 @@ class ChatEndpointAuthTest(unittest.TestCase):
                 )
         mock_gemini.assert_not_called()
 
+    def test_unexpected_error_does_not_leak_exception_detail(self):
+        with _stub_verified_uid("uid-safe-error", email_verified=True):
+            with patch("server.routes.chat.firestore.Client", side_effect=RuntimeError("secret detail")):
+                r = self.client.post(
+                    "/api/chat-assistant",
+                    json={"message": "hi"},
+                    headers={"Authorization": "Bearer fake"},
+                )
+        self.assertEqual(r.status_code, 500)
+        self.assertEqual(r.get_json(), {"error": "internal_error"})
+
 
 class ChatEndpointRateLimitTest(unittest.TestCase):
     """Verifies per-UID and per-IP rate limiting fires before Gemini work."""

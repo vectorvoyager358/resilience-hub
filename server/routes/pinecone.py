@@ -21,7 +21,7 @@ from server.index_content import (
     index_content_chunks,
     parent_id_for,
 )
-from server.rate_limit import TokenBucketLimiter
+from server.rate_limit import create_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,9 @@ def _get_index() -> Any:
 # Per-uid token bucket: ~30 mutations + 5 sustained req/s. Tune via env.
 _RATE_CAPACITY = int(os.environ.get("PINECONE_RATE_CAPACITY", "30"))
 _RATE_REFILL = float(os.environ.get("PINECONE_RATE_REFILL_PER_SEC", "5"))
-_limiter = TokenBucketLimiter(capacity=_RATE_CAPACITY, refill_per_second=_RATE_REFILL)
+_limiter = create_rate_limiter(
+    scope="pinecone-uid", capacity=_RATE_CAPACITY, refill_per_second=_RATE_REFILL
+)
 
 # Pinecone allows up to 1000 ids per delete; deletes-by-prefix iterate.
 _DELETE_BATCH_SIZE = 100

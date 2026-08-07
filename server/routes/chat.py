@@ -21,7 +21,7 @@ from server.prompt_loader import (
     render_chat_system_prompt,
     resolve_grounding_mode,
 )
-from server.rate_limit import TokenBucketLimiter
+from server.rate_limit import create_rate_limiter
 from server.rerank import rerank_enabled, rerank_pinecone_matches
 
 logger = logging.getLogger(__name__)
@@ -72,8 +72,12 @@ _UID_RATE_REFILL = float(os.environ.get("CHAT_UID_RATE_REFILL_PER_SEC", "0.5"))
 _IP_RATE_CAPACITY = int(os.environ.get("CHAT_IP_RATE_CAPACITY", "10"))
 _IP_RATE_REFILL = float(os.environ.get("CHAT_IP_RATE_REFILL_PER_SEC", "1"))
 
-_uid_limiter = TokenBucketLimiter(capacity=_UID_RATE_CAPACITY, refill_per_second=_UID_RATE_REFILL)
-_ip_limiter = TokenBucketLimiter(capacity=_IP_RATE_CAPACITY, refill_per_second=_IP_RATE_REFILL)
+_uid_limiter = create_rate_limiter(
+    scope="chat-uid", capacity=_UID_RATE_CAPACITY, refill_per_second=_UID_RATE_REFILL
+)
+_ip_limiter = create_rate_limiter(
+    scope="chat-ip", capacity=_IP_RATE_CAPACITY, refill_per_second=_IP_RATE_REFILL
+)
 
 
 def _client_ip() -> str:
@@ -464,7 +468,7 @@ def chat_assistant():
             except RuntimeError as e:
                 logger.warning("Gemini chat failed: %s", e)
                 trace.fail(status_code=503, error=str(e))
-                return jsonify({"error": "model_unavailable", "detail": str(e)}), 503
+                return jsonify({"error": "model_unavailable"}), 503
 
             trace.succeed(meta=meta, reply_chars=len(reply))
 
@@ -477,4 +481,4 @@ def chat_assistant():
             )
     except Exception as e:
         logger.exception("chat_assistant failed: %s", e)
-        return jsonify({"error": "internal_error", "detail": str(e)}), 500
+        return jsonify({"error": "internal_error"}), 500

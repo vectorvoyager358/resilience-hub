@@ -130,8 +130,6 @@ const NotesHistoryPage: React.FC = () => {
   })) || [];
 
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-
     const loadUserData = async () => {
       if (!currentUser) {
         setLoading(false);
@@ -142,24 +140,11 @@ const NotesHistoryPage: React.FC = () => {
         setLoading(true);
         setError(null);
         
-        const unsubscribeFunc = await getUserData(currentUser.uid)
-          .then((data) => {
-            if (data) {
-              setUserData(normalizeUserChallenges(data));
-            }
-            setLoading(false);
-            return undefined;
-          })
-          .catch((err) => {
-            console.error('Error loading user data:', err);
-            setError('Failed to load notes history. Please try again.');
-            setLoading(false);
-            return undefined;
-          });
-
-        if (unsubscribeFunc) {
-          unsubscribe = unsubscribeFunc;
+        const data = await getUserData(currentUser.uid);
+        if (data) {
+          setUserData(normalizeUserChallenges(data));
         }
+        setLoading(false);
       } catch (err) {
         console.error('Error in loadUserData:', err);
         setError('Failed to load notes history. Please try again.');
@@ -168,12 +153,6 @@ const NotesHistoryPage: React.FC = () => {
     };
 
     loadUserData();
-
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
   }, [currentUser]);
 
   useEffect(() => {
@@ -922,4 +901,4 @@ const NotesHistoryPage: React.FC = () => {
   );
 };
 
-export default NotesHistoryPage; 
+export default NotesHistoryPage;

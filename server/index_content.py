@@ -53,6 +53,18 @@ def delete_parent_chunks(index: Any, uid: str, parent_id: str) -> None:
             index.delete(ids=batch)
 
 
+def delete_trailing_chunks(index: Any, uid: str, parent_id: str, start_index: int) -> None:
+    """Delete stale chunk ids after a successful replacement upsert."""
+    if not parent_id.startswith(f"{uid}-"):
+        return
+    start = max(0, start_index)
+    ids = [vector_id_for_chunk(parent_id, i) for i in range(start, MAX_INDEX_CHUNKS)]
+    for i in range(0, len(ids), _DELETE_BATCH_SIZE):
+        batch = ids[i : i + _DELETE_BATCH_SIZE]
+        if batch:
+            index.delete(ids=batch)
+
+
 def delete_vectors_by_id_prefix(index: Any, uid: str, id_prefix: str) -> int:
     """Delete vectors by id prefix. Chunk parents use direct id delete (fast path)."""
     if not id_prefix.startswith(f"{uid}-"):
@@ -127,8 +139,8 @@ def index_content_chunks(
         len(chunks),
     )
 
-    delete_parent_chunks(index, uid, parent)
-
+    # Preserve the last known-good index if embedding or upsert fails. Stable
+    # chunk ids make the successful upsert an atomic replacement per vector.
     chunk_vectors = _embed_chunks(chunks)
     if len(chunk_vectors) != len(chunks):
         raise RuntimeError("embedding_failed")
@@ -145,6 +157,7 @@ def index_content_chunks(
         vectors.append((vid, chunk_vectors[idx], md))
 
     index.upsert(vectors=vectors)
+    delete_trailing_chunks(index, uid, parent, chunk_count)
     primary_id = vector_id_for_chunk(parent, 0)
     logger.info(
         "index_content ok uid=%s parent=%s chunks=%d primary=%s",

@@ -16,7 +16,8 @@ if [[ ! -x ".venv/bin/python" ]] || ! .venv/bin/python -c 'import sys; raise Sys
 fi
 
 if [[ ! -x ".venv/bin/pip-compile" ]]; then
-  .venv/bin/pip install --upgrade pip pip-tools
+  # pip-tools 7.6.0 is not yet compatible with pip 26.2.
+  .venv/bin/pip install --upgrade "pip<26.2" pip-tools
 fi
 PIP_COMPILE=".venv/bin/pip-compile"
 

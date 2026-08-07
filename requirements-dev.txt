@@ -139,6 +139,8 @@ googleapis-common-protos==1.75.0
     #   google-api-core
     #   grpcio-status
     #   opentelemetry-exporter-otlp-proto-http
+greenlet==3.5.4
+    # via sqlalchemy
 grpcio==1.81.1
     # via
     #   google-ai-generativelanguage
@@ -320,7 +322,7 @@ packaging==26.2
     #   marshmallow
 pandas==3.0.3
     # via datasets
-pillow==12.2.0
+pillow==12.3.0
     # via ragas
 pinecone==9.1.0
     # via -r requirements.in

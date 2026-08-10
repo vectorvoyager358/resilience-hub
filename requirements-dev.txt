@@ -99,18 +99,14 @@ gitdb==4.0.12
     # via gitpython
 gitpython==3.1.58
     # via ragas
-google-ai-generativelanguage==0.12.0
-    # via langchain-google-genai
 google-api-core==2.31.0
     # via
     #   firebase-admin
-    #   google-ai-generativelanguage
     #   google-cloud-core
     #   google-cloud-firestore
     #   google-cloud-storage
 google-auth==2.55.0
     # via
-    #   google-ai-generativelanguage
     #   google-api-core
     #   google-cloud-core
     #   google-cloud-firestore
@@ -131,7 +127,9 @@ google-crc32c==1.8.0
     #   google-cloud-storage
     #   google-resumable-media
 google-genai==2.10.0
-    # via -r requirements.in
+    # via
+    #   -r requirements.in
+    #   langchain-google-genai
 google-resumable-media==2.10.0
     # via google-cloud-storage
 googleapis-common-protos==1.75.0
@@ -143,7 +141,6 @@ greenlet==3.5.4
     # via sqlalchemy
 grpcio==1.81.1
     # via
-    #   google-ai-generativelanguage
     #   google-api-core
     #   google-cloud-firestore
     #   grpcio-status
@@ -213,7 +210,7 @@ langchain-community==0.3.31
     # via
     #   -r requirements-dev.in
     #   ragas
-langchain-core==1.4.8
+langchain-core==1.5.3
     # via
     #   langchain
     #   langchain-community
@@ -224,7 +221,7 @@ langchain-core==1.4.8
     #   langgraph-prebuilt
     #   langgraph-sdk
     #   ragas
-langchain-google-genai==2.1.12
+langchain-google-genai==4.3.2
     # via -r requirements-dev.in
 langchain-openai==1.3.3
     # via ragas
@@ -332,12 +329,10 @@ propcache==0.5.2
     #   yarl
 proto-plus==1.28.0
     # via
-    #   google-ai-generativelanguage
     #   google-api-core
     #   google-cloud-firestore
 protobuf==7.35.1
     # via
-    #   google-ai-generativelanguage
     #   google-api-core
     #   google-cloud-firestore
     #   googleapis-common-protos

@@ -55,7 +55,7 @@
     "@types/node": "^22.15.0",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
-    "@vitejs/plugin-react-swc": "^3.11.0",
+    "@vitejs/plugin-react-swc": "^4.3.3",
     "@vitest/ui": "^3.2.6",
     "audit-ci": "7.1.0",
     "bidi-js": "^1.0.3",

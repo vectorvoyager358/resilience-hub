@@ -3,5 +3,5 @@
 #
 -r requirements.in
 ragas>=0.3.2,<0.3.3
-langchain-google-genai>=2,<3
+langchain-google-genai>=4.3.2,<5
 langchain-community>=0.3,<0.4

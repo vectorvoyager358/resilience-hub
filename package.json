@@ -59,7 +59,7 @@
     "@vitest/ui": "^3.2.6",
     "audit-ci": "7.1.0",
     "bidi-js": "^1.0.3",
-    "eslint": "^9.39.4",
+    "eslint": "^10.8.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",

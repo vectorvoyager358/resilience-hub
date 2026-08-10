@@ -35,7 +35,7 @@
     "@mui/material": "^5.17.1",
     "@mui/x-date-pickers": "^7.29.4",
     "chart.js": "^4.5.1",
-    "firebase": "^11.6.1",
+    "firebase": "^12.17.1",
     "framer-motion": "^12.41.0",
     "fuse.js": "^7.4.2",
     "jspdf": "^4.2.1",
